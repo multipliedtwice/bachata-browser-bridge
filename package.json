@@ -1,0 +1,53 @@
+{
+  "name": "bachata-browser-bridge",
+  "version": "0.6.7",
+  "private": true,
+  "description": "Authenticated ChatGPT, Claude, and explicitly bound generic browser-LLM transport for Bachata pipeline runs",
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "format:check": "node scripts/format-check.mjs",
+    "check-types": "tsc --noEmit",
+    "build": "node scripts/with-artifact-lock.mjs -- npm run build:unlocked",
+    "build:unlocked": "npm run build:base:unlocked && npm run build:generic:unlocked",
+    "test": "node scripts/with-artifact-lock.mjs -- npm run test:unlocked",
+    "test:unlocked": "npm run check:lockfile && npm run check:no-telemetry && npm run test:source-distribution && npm run check:generic-browser && npm run build && npm run test:generic-healing && node --test tests/*.test.mjs",
+    "test:coverage": "node scripts/with-artifact-lock.mjs -- npm run test:coverage:unlocked",
+    "test:coverage:unlocked": "npm run build && npm run test:coverage:core && npm run test:coverage:entries",
+    "test:coverage:core": "node scripts/with-artifact-lock.mjs -- node scripts/run-coverage-gates.mjs core",
+    "test:coverage:entries": "node scripts/with-artifact-lock.mjs -- node scripts/run-coverage-gates.mjs entries",
+    "check:no-telemetry": "node scripts/verify-no-telemetry.mjs",
+    "build:base": "node scripts/with-artifact-lock.mjs -- npm run build:base:unlocked",
+    "build:base:unlocked": "npm run check-types && npm run clean && tsc && node scripts/copy-assets.mjs",
+    "build:generic": "node scripts/with-artifact-lock.mjs -- npm run build:generic:unlocked",
+    "build:generic:unlocked": "node scripts/build-generic.mjs",
+    "check:generic-browser": "node scripts/verify-generic-browser.mjs",
+    "test:generic-healing": "node scripts/test-generic-healing.mjs",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
+    "source:export": "node scripts/source-distribution.mjs export",
+    "source:verify": "node scripts/source-distribution.mjs verify",
+    "test:source-distribution": "node --test tests/sourceDistribution.test.mjs",
+    "package": "node scripts/with-artifact-lock.mjs -- npm run package:unlocked",
+    "package:unlocked": "npm test && node scripts/package.mjs",
+    "clean": "node scripts/with-artifact-lock.mjs -- node scripts/clean-dist.mjs"
+  },
+  "devDependencies": {
+    "@mixmark-io/domino": "2.2.0",
+    "@testing-library/dom": "10.4.1",
+    "@types/chrome": "0.0.300",
+    "@types/node": "22.0.0",
+    "@types/turndown": "5.0.5",
+    "esbuild": "0.25.8",
+    "typescript": "5.8.3"
+  },
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@medv/finder": "4.0.2",
+    "@mozilla/readability": "0.6.0",
+    "ajv": "8.20.0",
+    "dom-accessibility-api": "0.7.0",
+    "jsonrepair": "3.13.1",
+    "turndown": "7.2.0",
+    "turndown-plugin-gfm": "1.0.2"
+  }
+}

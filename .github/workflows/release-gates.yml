@@ -1,0 +1,81 @@
+# This workflow must stay inside this repository. GitHub only discovers workflows under a
+# repository root, and browser-bridge is its own repository: a workflow held in the parent
+# working directory is tracked by nothing and never runs.
+name: Release gates
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-release-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install from the lockfile only
+        run: npm ci
+
+      - name: Refuse an unclean checkout
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "The checkout was dirty before any gate ran:"
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Types
+        run: npm run check-types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: No telemetry
+        run: npm run check:no-telemetry
+
+      - name: Tests
+        run: npm test
+
+      - name: Coverage gates
+        run: npm run test:coverage
+
+      - name: Package
+        run: npm run package
+
+      - name: Refuse source drift from the gates
+        shell: bash
+        run: |
+          git status --porcelain -- . ':!*.zip' > /tmp/drift
+          if [ -s /tmp/drift ]; then
+            echo "A gate modified tracked source:"
+            cat /tmp/drift
+            exit 1
+          fi

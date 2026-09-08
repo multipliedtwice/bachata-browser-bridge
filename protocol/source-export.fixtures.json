@@ -1,0 +1,26 @@
+{
+  "id": "bachata-source-export-exclusion-v1",
+  "note": "Shared lexical exclusion matrix. Both repositories carry identical bytes; each repository pins this file's SHA-256 so a one-sided edit fails that repository's suite.",
+  "cases": [
+    { "name": "root .git directory", "path": ".git", "type": "directory", "excluded": true },
+    { "name": "root .git file in a managed worktree", "path": ".git", "type": "file", "excluded": true },
+    { "name": "root .git symbolic link", "path": ".git", "type": "symlink", "excluded": true },
+    { "name": "nested .git directory", "path": "src/vendor/.git", "type": "directory", "excluded": true },
+    { "name": "nested .git file", "path": "src/vendor/.git", "type": "file", "excluded": true },
+    { "name": "root node_modules directory", "path": "node_modules", "type": "directory", "excluded": true },
+    { "name": "root node_modules symbolic link", "path": "node_modules", "type": "symlink", "excluded": true },
+    { "name": "root node_modules broken symbolic link", "path": "node_modules", "type": "broken-symlink", "excluded": true },
+    { "name": "nested node_modules directory", "path": "src/pkg/node_modules", "type": "directory", "excluded": true },
+    { "name": "nested node_modules symbolic link", "path": "src/pkg/node_modules", "type": "symlink", "excluded": true },
+    { "name": "root dist directory", "path": "dist", "type": "directory", "excluded": true },
+    { "name": "root coverage directory", "path": "coverage", "type": "directory", "excluded": true },
+    { "name": "root package-lock.json is carried", "path": "package-lock.json", "type": "file", "excluded": false },
+    { "name": "nested package-lock.json is excluded", "path": "src/package-lock.json", "type": "file", "excluded": true },
+    { "name": "regular source file", "path": "src/index.ts", "type": "file", "excluded": false },
+    { "name": "regular source directory", "path": "src", "type": "directory", "excluded": false },
+    { "name": "carried symbolic link is rejected, not excluded", "path": "src/linked.ts", "type": "symlink", "excluded": false, "rejected": true },
+    { "name": "carried broken symbolic link is rejected, not excluded", "path": "src/dangling.ts", "type": "broken-symlink", "excluded": false, "rejected": true },
+    { "name": "DS_Store file", "path": "src/.DS_Store", "type": "file", "excluded": true },
+    { "name": "backup suffix file", "path": "src/notes.bak", "type": "file", "excluded": true }
+  ]
+}

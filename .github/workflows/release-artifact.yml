@@ -1,0 +1,135 @@
+# BB-AUD-05 / BACHATA-AUD-01. The release-gates workflow builds and packages, then throws the
+# archive away, so the Extension repository had no way to consume the exact bytes it pins.
+# This job publishes them: the verified ZIP, its digest, and the protocol contract the
+# Extension compares against.
+#
+# It publishes artifacts only. It does not tag, release, or notify anything, and it does not
+# decide that a build ships — that decision stays human and lives in the Extension's release
+# verdict.
+name: Release artifact
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-release-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package and publish the verified archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install from the lockfile only
+        run: npm ci
+
+      - name: Refuse an unclean checkout
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "The checkout was dirty before any gate ran:"
+            git status --porcelain
+            exit 1
+          fi
+
+      # `npm run package` is `npm test && scripts/package.mjs`, and `npm test` does not
+      # include lint, format check or coverage. They are run here explicitly so the uploaded
+      # archive is only ever produced by a build that passed every gate this repository has.
+      - name: Types
+        run: npm run check-types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Coverage gates
+        run: npm run test:coverage
+
+      - name: Package
+        run: npm run package
+
+      - name: Record the archive identity
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          name="bachata-browser-bridge-${version}.zip"
+          if [ ! -f "$name" ]; then
+            echo "Packaging produced no ${name}"
+            ls -la
+            exit 1
+          fi
+          digest="$(shasum -a 256 "$name" | cut -d' ' -f1)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${digest}" >> "$GITHUB_OUTPUT"
+          printf '%s  %s\n' "$digest" "$name" > "${name}.sha256"
+          echo "Browser Bridge ${version}: ${digest}"
+
+      # Before anything is published, not after. An `upload-artifact` step makes its artifact
+      # downloadable the moment it finishes, so a drift gate placed after the uploads cannot
+      # withdraw what it rejects: the failing run still leaves a complete, fetchable artifact
+      # set behind for another workflow to consume.
+      - name: Refuse source drift from packaging
+        shell: bash
+        run: |
+          git status --porcelain -- . ':!*.zip' ':!*.zip.sha256' > /tmp/drift
+          if [ -s /tmp/drift ]; then
+            echo "Packaging modified tracked source:"
+            cat /tmp/drift
+            exit 1
+          fi
+
+      - name: Publish the archive and its digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-bridge-${{ steps.archive.outputs.version }}
+          path: |
+            ${{ steps.archive.outputs.name }}
+            ${{ steps.archive.outputs.name }}.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      # The archive does not carry the contract or the shared fixture tables, so parity has
+      # to be fed from the source tree. Published separately for the Extension's parity gate.
+      - name: Publish the protocol contract and shared fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-protocol-contract-${{ steps.archive.outputs.version }}
+          path: |
+            protocol/browser-protocol-v9.contract.json
+            protocol/source-export.fixtures.json
+            protocol/asset-name.fixtures.json
+          if-no-files-found: error
+          retention-days: 90
+
+      # `verifyBridgeArchive` compares the archive entry by entry against the build it was
+      # packaged from, and looks for that build in a `dist` directory beside the archive.
+      # Without it the Extension's verification cannot run at all, so the build travels with
+      # the archive rather than being rebuilt on the other side.
+      - name: Publish the packaged build
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-bridge-dist-${{ steps.archive.outputs.version }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 90

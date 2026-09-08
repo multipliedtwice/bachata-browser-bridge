@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Bachata Browser Bridge",
+  "version": "0.6.7",
+  "description": "Authenticated ChatGPT, Claude, and explicitly bound generic browser-LLM transport for Bachata pipeline runs",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "clipboardRead",
+    "contextMenus",
+    "favicon",
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://127.0.0.1/*",
+    "https://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Bachata Browser Bridge"
+  },
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}

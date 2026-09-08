@@ -1,0 +1,112 @@
+{
+  "id": "bachata-asset-name-sanitation-v1",
+  "note": "Shared filename sanitation matrix. Both repositories carry identical bytes and pin this file's SHA-256, so a one-sided rule change fails that repository's suite. Every case here exercises a rule both repositories share: bidirectional control removal, trailing dot and space stripping, and Windows device stems. Path and directory handling is deliberately absent, because the Extension resolves a basename for a file it will write and the Bridge only labels an offer; each repository asserts that half in its own suite. `expected` uses the shared fallback name.",
+  "fallback": "browser-asset",
+  "cases": [
+    {
+      "name": "ordinary name is untouched",
+      "input": "report.png",
+      "expected": "report.png"
+    },
+    {
+      "name": "right-to-left override is removed",
+      "input": "report\u202egnp.exe",
+      "expected": "reportgnp.exe"
+    },
+    {
+      "name": "left-to-right mark is removed",
+      "input": "in\u200evoice.pdf",
+      "expected": "invoice.pdf"
+    },
+    {
+      "name": "arabic letter mark is removed",
+      "input": "a\u061cb.txt",
+      "expected": "ab.txt"
+    },
+    {
+      "name": "isolate controls are removed",
+      "input": "a\u2066b\u2069c.txt",
+      "expected": "abc.txt"
+    },
+    {
+      "name": "trailing dot is stripped",
+      "input": "report.txt.",
+      "expected": "report.txt"
+    },
+    {
+      "name": "trailing dots are stripped",
+      "input": "report.txt...",
+      "expected": "report.txt"
+    },
+    {
+      "name": "trailing space is stripped",
+      "input": "report.txt ",
+      "expected": "report.txt"
+    },
+    {
+      "name": "trailing dot and space mix is stripped",
+      "input": "report.txt . ",
+      "expected": "report.txt"
+    },
+    {
+      "name": "CON device stem is prefixed",
+      "input": "CON",
+      "expected": "_CON"
+    },
+    {
+      "name": "CON with extension is prefixed",
+      "input": "CON.txt",
+      "expected": "_CON.txt"
+    },
+    {
+      "name": "lowercase com1 is prefixed",
+      "input": "com1.log",
+      "expected": "_com1.log"
+    },
+    {
+      "name": "LPT9 is prefixed",
+      "input": "LPT9.dat",
+      "expected": "_LPT9.dat"
+    },
+    {
+      "name": "NUL is prefixed",
+      "input": "NUL",
+      "expected": "_NUL"
+    },
+    {
+      "name": "PRN is prefixed",
+      "input": "prn.bin",
+      "expected": "_prn.bin"
+    },
+    {
+      "name": "AUX is prefixed",
+      "input": "AUX",
+      "expected": "_AUX"
+    },
+    {
+      "name": "device-like name that is not a device is untouched",
+      "input": "CONSOLE.txt",
+      "expected": "CONSOLE.txt"
+    },
+    {
+      "name": "COM0 is not a device",
+      "input": "COM0.txt",
+      "expected": "COM0.txt"
+    },
+    {
+      "name": "a name of only dots falls back",
+      "input": "...",
+      "expected": "browser-asset"
+    },
+    {
+      "name": "an empty name falls back",
+      "input": "",
+      "expected": "browser-asset"
+    },
+    {
+      "name": "control characters become underscores",
+      "input": "a\u0001b.txt",
+      "expected": "a_b.txt"
+    }
+  ]
+}

@@ -1,0 +1,372 @@
+{
+  "id": "bachata-browser-bridge-v9",
+  "protocolVersion": 9,
+  "endpointPath": "/bachata-browser-bridge-v9",
+  "conversationBindingFields": [
+    "requestId",
+    "agentId",
+    "provider",
+    "sessionId",
+    "tabId",
+    "frameId",
+    "documentId",
+    "documentToken",
+    "conversationUrl",
+    "conversationIdentity"
+  ],
+  "clientMessageTypes": [
+    "bridge.pair",
+    "bridge.authenticate",
+    "bridge.disconnect",
+    "bridge.ping",
+    "provider.status",
+    "provider.openConversation.result",
+    "conversation.submitted",
+    "conversation.stream",
+    "conversation.response",
+    "conversation.interrupted",
+    "conversation.interruptFailed",
+    "conversation.error",
+    "asset.start",
+    "asset.chunk",
+    "asset.complete",
+    "asset.error",
+    "asset.reveal.result"
+  ],
+  "serverMessageTypes": [
+    "bridge.paired",
+    "bridge.connected",
+    "bridge.error",
+    "bridge.pong",
+    "localModel.config",
+    "provider.discover",
+    "provider.openConversation",
+    "provider.cancelOpenConversation",
+    "conversation.send",
+    "conversation.interrupt",
+    "asset.fetch",
+    "asset.cancel",
+    "asset.reveal"
+  ],
+  "captureFormats": [
+    "renderedText"
+  ],
+  "captureFidelities": [
+    "bestEffort"
+  ],
+  "segmentTypes": [
+    "text",
+    "codeBlock",
+    "quote"
+  ],
+  "assetKinds": [
+    "generatedFile",
+    "artifact",
+    "canvas",
+    "image",
+    "codeArtifact"
+  ],
+  "assetSourceElements": [
+    "assistantMessage",
+    "artifactPane"
+  ],
+  "clientCompatibilityFixtures": [
+    {
+      "type": "bridge.pair",
+      "protocolVersion": 9,
+      "token": "bachata-token"
+    },
+    {
+      "type": "bridge.authenticate",
+      "protocolVersion": 9,
+      "connectionToken": "connection-token"
+    },
+    {
+      "type": "bridge.disconnect",
+      "protocolVersion": 9
+    },
+    {
+      "type": "bridge.ping",
+      "protocolVersion": 9,
+      "nonce": "nonce-1"
+    },
+    {
+      "type": "provider.status",
+      "protocolVersion": 9,
+      "sessions": [
+        {
+          "id": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+          "provider": "chatgpt",
+          "tabId": 10,
+          "frameId": 0,
+          "documentId": "document-10",
+          "documentToken": "document-token",
+          "conversationUrl": "https://chatgpt.com/c/example",
+          "conversationIdentity": "chatgpt:https://chatgpt.com/c/example",
+          "title": "Example",
+          "status": "ready",
+          "createdAt": "2026-08-02T05:00:00.000Z",
+          "updatedAt": "2026-08-02T05:00:01.000Z"
+        },
+        {
+          "id": "claude:20:document-token-2:claude%3Ahttps%3A%2F%2Fclaude.ai%2Fchat%2Fexample",
+          "provider": "claude",
+          "tabId": 20,
+          "frameId": 0,
+          "documentId": "document-20",
+          "documentToken": "document-token-2",
+          "conversationUrl": "https://claude.ai/chat/example",
+          "conversationIdentity": "claude:https://claude.ai/chat/example",
+          "title": "Claude Example",
+          "status": "ready",
+          "createdAt": "2026-08-02T05:00:00.000Z",
+          "updatedAt": "2026-08-02T05:00:01.000Z"
+        }
+      ],
+      "selectedSessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample"
+    },
+    {
+      "type": "provider.openConversation.result",
+      "protocolVersion": 9,
+      "requestId": "open-1",
+      "provider": "chatgpt",
+      "success": true,
+      "session": {
+        "id": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+        "provider": "chatgpt",
+        "tabId": 10,
+        "frameId": 0,
+        "documentId": "document-10",
+        "documentToken": "document-token",
+        "conversationUrl": "https://chatgpt.com/c/example",
+        "conversationIdentity": "chatgpt:https://chatgpt.com/c/example",
+        "title": "Example",
+        "status": "ready",
+        "createdAt": "2026-08-02T05:00:00.000Z",
+        "updatedAt": "2026-08-02T05:00:01.000Z"
+      }
+    },
+    {
+      "type": "conversation.submitted",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample"
+    },
+    {
+      "type": "conversation.stream",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "mode": "replace",
+      "text": "ok"
+    },
+    {
+      "type": "conversation.response",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "provider": "chatgpt",
+      "text": "ok",
+      "segments": [
+        {
+          "type": "text",
+          "text": "ok",
+          "start": 0,
+          "end": 2
+        }
+      ],
+      "assets": [
+        {
+          "id": "asset-1",
+          "provider": "chatgpt",
+          "kind": "generatedFile",
+          "name": "report.txt",
+          "mimeType": "text/plain",
+          "size": 2,
+          "sourceElement": "assistantMessage",
+          "downloadAvailable": true,
+          "previewText": "ok",
+          "sourceOrigin": "https://chatgpt.com"
+        }
+      ],
+      "captureFormat": "renderedText",
+      "fidelity": "bestEffort",
+      "finalConversationUrl": "https://chatgpt.com/c/example",
+      "finalConversationIdentity": "chatgpt:https://chatgpt.com/c/example",
+      "finalSessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "startedAt": "2026-08-02T05:00:02.000Z",
+      "completedAt": "2026-08-02T05:00:03.000Z"
+    },
+    {
+      "type": "conversation.interrupted",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample"
+    },
+    {
+      "type": "conversation.interruptFailed",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "message": "The stop control could not be confirmed"
+    },
+    {
+      "type": "conversation.error",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "code": "INTERRUPT_MISMATCH",
+      "message": "Request is not active"
+    },
+    {
+      "type": "asset.start",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1",
+      "name": "report.txt",
+      "mimeType": "text/plain",
+      "size": 2
+    },
+    {
+      "type": "asset.chunk",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1",
+      "sequence": 0,
+      "dataBase64": "b2s="
+    },
+    {
+      "type": "asset.complete",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1",
+      "size": 2,
+      "sha256": "2689367b205c16ce32ed4200942b8b1e674d1a4a7a9f1aa1c9f6d6e0b8c0f0f0"
+    },
+    {
+      "type": "asset.error",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1",
+      "code": "FETCH_FAILED",
+      "message": "Download failed"
+    },
+    {
+      "type": "asset.reveal.result",
+      "protocolVersion": 9,
+      "requestId": "reveal-1",
+      "assetId": "asset-1",
+      "success": true
+    }
+  ],
+  "serverCompatibilityFixtures": [
+    {
+      "type": "bridge.paired",
+      "protocolVersion": 9,
+      "connectionToken": "connection-token"
+    },
+    {
+      "type": "bridge.connected",
+      "protocolVersion": 9
+    },
+    {
+      "type": "bridge.error",
+      "protocolVersion": 9,
+      "code": "AUTH_FAILED",
+      "message": "Authentication failed"
+    },
+    {
+      "type": "bridge.pong",
+      "protocolVersion": 9,
+      "nonce": "nonce-1"
+    },
+    {
+      "type": "localModel.config",
+      "protocolVersion": 9,
+      "enabled": true,
+      "backend": "auto",
+      "endpoint": "http://127.0.0.1:1234",
+      "model": "bonsai",
+      "timeoutMs": 30000
+    },
+    {
+      "type": "provider.discover",
+      "protocolVersion": 9
+    },
+    {
+      "type": "provider.openConversation",
+      "protocolVersion": 9,
+      "requestId": "open-1",
+      "provider": "chatgpt"
+    },
+    {
+      "type": "provider.cancelOpenConversation",
+      "protocolVersion": 9,
+      "requestId": "open-request-1"
+    },
+    {
+      "type": "conversation.send",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "provider": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "tabId": 10,
+      "frameId": 0,
+      "documentId": "document-10",
+      "documentToken": "document-token",
+      "conversationUrl": "https://chatgpt.com/c/example",
+      "conversationIdentity": "chatgpt:https://chatgpt.com/c/example",
+      "text": "Inspect the workspace.",
+      "allowInitialConversationTransition": false,
+      "deadlineAt": 1893456000000,
+      "attachments": [
+        {
+          "name": "screen.png",
+          "mimeType": "image/png",
+          "size": 1,
+          "dataBase64": "AA=="
+        }
+      ]
+    },
+    {
+      "type": "conversation.interrupt",
+      "protocolVersion": 9,
+      "requestId": "request-1",
+      "agentId": "chatgpt",
+      "provider": "chatgpt",
+      "sessionId": "chatgpt:10:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Fexample",
+      "tabId": 10,
+      "frameId": 0,
+      "documentId": "document-10",
+      "documentToken": "document-token",
+      "conversationUrl": "https://chatgpt.com/c/example",
+      "conversationIdentity": "chatgpt:https://chatgpt.com/c/example"
+    },
+    {
+      "type": "asset.fetch",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1",
+      "maxBytes": 52428800
+    },
+    {
+      "type": "asset.cancel",
+      "protocolVersion": 9,
+      "transferId": "transfer-1",
+      "assetId": "asset-1"
+    },
+    {
+      "type": "asset.reveal",
+      "protocolVersion": 9,
+      "requestId": "reveal-1",
+      "assetId": "asset-1"
+    }
+  ]
+}
