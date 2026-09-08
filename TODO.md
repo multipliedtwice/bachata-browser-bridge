@@ -17,7 +17,7 @@ Rules:
 - Remove an item only after its named tests and gates pass. Rewrite partial work to
   remaining scope. Record failures outside this backlog; no invented green claim.
 - Order: N1 may run now. L1 gates C1, then C2. V1 gates V2; L1 additionally gates typed activity. K1 is a
-  product and security decision, not implementation authority. O1 last.
+  product and security decision, not implementation authority.
 
 ## Audit closure
 
@@ -286,9 +286,8 @@ Acceptance:
 
 ## Open review dependencies
 
-Two prior review items remain open; each is owned by the section named.
+Remaining prior review item:
 
-- [ ] `REVIEW-05 / BR-3` closes with O1: hosted evidence of the tracked workflow remains.
 - [ ] `REVIEW-10 / BB-3` closes with N1's live evidence — authenticated provider access and real
   BFCache. Its only remaining dependency is that live evidence.
 
@@ -325,20 +324,6 @@ Two prior review items remain open; each is owned by the section named.
 - Blind Tab-count navigation. Trusted-keyboard claim for synthetic DOM events.
 - Chrome debugger/CDP input without explicit trust-boundary approval.
 - Stealth, fingerprint masking, or provider anti-automation bypass.
-
-## O1: tracked workflow and hosted evidence
-
-Canonical public remote: `https://github.com/multipliedtwice/bachata-browser-bridge`.
-Authorized source is pushed. Hosted cross-platform validation is running;
-Windows failures remain under repair. No all-platform pass recorded.
-
-- [ ] Prove the tracked three-OS workflow on an authorized hosted candidate: clean checkout,
-  exact Node, `npm ci`, types, no telemetry, tests, coverage, package, source-drift rejection.
-- [ ] After authorized push/PR/tag, observe Ubuntu/macOS/Windows jobs. Record URLs,
-  commit SHA, artifact identity, pass/fail. Do not call CI enforced/green before
-  observed protected-branch/release behavior.
-- [ ] If workflow fails, fix only reproduced Bridge cause. Never weaken gate to
-  obtain green.
 
 ## Verification
 
@@ -383,7 +368,7 @@ Live release gates:
 
 Stop conditions:
 
-- Missing owner decision on v10 compatibility/privacy or remote destination.
+- Missing owner decision on v10 compatibility/privacy.
 - No stable live DOM boundary for typed activity.
 - Required provider/account unavailable for live gate.
 - Destructive operation, dependency install, network write, commit, tag, push,

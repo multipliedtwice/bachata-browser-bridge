@@ -40,3 +40,10 @@ Grok, Z.AI, and other Generic targets are named as supported only after their ex
 ## Release evidence
 
 Keep the checklist result with the release work. Do not add analytics, crash reporting, remote diagnostics, usage history, provider-success tracking, or other telemetry to collect release evidence.
+
+## Observed automated validation
+
+2026-09-08: [Release gates run 34199689556](https://github.com/multipliedtwice/bachata-browser-bridge/actions/runs/34199689556)
+passed on Ubuntu, macOS and Windows. Source: `5ae4436107bf5b4d14ccd4ac8d1a9865febc366a`.
+Clean lockfile install, types, lint, format, no telemetry, tests, coverage, package and
+source-drift checks passed. Live-provider and exact-package visual acceptance remain open.
