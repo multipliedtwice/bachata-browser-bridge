@@ -976,7 +976,7 @@ test("an inspection that fails refuses, and only ENOENT or ENOTDIR means genuine
   // permission or an I/O error ended the walk with the same answer a genuinely absent directory
   // gives — and that answer authorizes a recursive removal. Only `ENOENT` and `ENOTDIR` state
   // that a path is not there; everything else states that the question was not answered.
-  const root = path.join(path.sep, "owned", "root");
+  const root = path.resolve(path.sep, "owned", "root");
   const link = { isSymbolicLink: () => true };
   const directory = { isSymbolicLink: () => false };
   const roots = new Set([root]);
@@ -1057,7 +1057,7 @@ test("the containment primitive names what was in the way and why", () => {
   // The primitive `clean` and the scratch guard share, read directly: both callers word their own
   // refusal from it, so what it returns is part of the contract rather than an implementation
   // detail of either one.
-  const root = path.join(path.sep, "owned", "root");
+  const root = path.resolve(path.sep, "owned", "root");
   const stats = (isLink) => ({ isSymbolicLink: () => isLink });
   const linkAt = (entry) => (candidate) => {
     if (candidate === entry) return stats(true);
@@ -1277,8 +1277,9 @@ const gateRepository = async (root) => {
   return repository;
 };
 
-const runGate = (repository, script) => {
-  const result = spawnSync(process.execPath, [path.join("scripts", script)], {
+const runGate = (repository, script, preload = "") => {
+  const args = preload ? ["--import", `data:text/javascript,${encodeURIComponent(preload)}`] : [];
+  const result = spawnSync(process.execPath, [...args, path.join("scripts", script)], {
     cwd: repository,
     encoding: "utf8",
   });
@@ -1296,7 +1297,8 @@ test("both gates cover tracked and unignored untracked files, and no ignored one
     // re-encode — the files a gate that parsed quoted output would silently skip.
     await write(repository, "src/untracked.mjs", "export const untracked = 1;\n");
     await write(repository, "src/with space.mjs", "export const spaced = 1;\n");
-    await write(repository, 'src/na\u00efve-"quoted".mjs', "export const unusual = 1;\n");
+    const unusual = process.platform === "win32" ? "src/naïve-quoted.mjs" : 'src/naïve-"quoted".mjs';
+    await write(repository, unusual, "export const unusual = 1;\n");
     // Ignored generated output, carrying both violations.
     await write(repository, "generated/ignored.mjs", "// @ts-ignore  \nexport const ignored = 1;\n");
 
@@ -1304,7 +1306,7 @@ test("both gates cover tracked and unignored untracked files, and no ignored one
     assert.ok(enumerated.includes("src/tracked.mjs"), JSON.stringify(enumerated));
     assert.ok(enumerated.includes("src/untracked.mjs"), JSON.stringify(enumerated));
     assert.ok(enumerated.includes("src/with space.mjs"), JSON.stringify(enumerated));
-    assert.ok(enumerated.includes('src/na\u00efve-"quoted".mjs'), JSON.stringify(enumerated));
+    assert.ok(enumerated.includes(unusual), JSON.stringify(enumerated));
     assert.equal(enumerated.includes("generated/ignored.mjs"), false, "an ignored file was enumerated");
     assert.deepEqual(candidateFiles(repository), enumerated, "the enumeration is not deterministic");
     assert.equal(new Set(enumerated).size, enumerated.length, "the enumeration repeated a path");
@@ -1511,11 +1513,20 @@ test("an eligible file a gate cannot read fails the gate instead of vanishing fr
     assert.equal(runGate(repository, "lint.mjs").status, 0);
 
     opaque = await write(repository, "src/opaque.mjs", "export const opaque = 1;\n");
-    await chmod(opaque, 0o000);
-    const lint = runGate(repository, "lint.mjs");
+    const preload = process.platform === "win32" ? `
+      import fs from "node:fs/promises";
+      import { syncBuiltinESMExports } from "node:module";
+      const open = fs.open;
+      fs.open = (file, ...args) => String(file) === ${JSON.stringify(opaque)}
+        ? Promise.reject(Object.assign(new Error("fixture read denied"), { code: "EACCES" }))
+        : open(file, ...args);
+      syncBuiltinESMExports();
+    ` : "";
+    if (process.platform !== "win32") await chmod(opaque, 0o000);
+    const lint = runGate(repository, "lint.mjs", preload);
     assert.equal(lint.status, 1, lint.output);
     assert.match(lint.output, /src\/opaque\.mjs: could not be read \(EACCES\) — not checked/u);
-    const format = runGate(repository, "format-check.mjs");
+    const format = runGate(repository, "format-check.mjs", preload);
     assert.equal(format.status, 1, format.output);
     assert.match(format.output, /src\/opaque\.mjs: could not be read \(EACCES\) — not checked/u);
   } finally {
@@ -1559,13 +1570,35 @@ test("a filename cannot write a line of the gate's own output", async () => {
     const repository = await gateRepository(root);
     await write(repository, "src/tracked.mjs", "export const tracked = 1;\n");
     const forged = "src/inject\n- src/decoy.mjs:1: no-ts-ignore: forged.mjs";
-    await write(repository, forged, "// @ts-ignore\nexport const injected = 1;\n");
+    const stored = process.platform === "win32" ? "src/injected.mjs" : forged;
+    await write(repository, stored, "// @ts-ignore\nexport const injected = 1;\n");
+    const preload = process.platform === "win32" ? `
+      import child from "node:child_process";
+      import fs from "node:fs/promises";
+      import { syncBuiltinESMExports } from "node:module";
+      const spawn = child.spawnSync;
+      child.spawnSync = (...args) => {
+        const result = spawn(...args);
+        if (args[0] === "git" && args[1][0] === "ls-files" && typeof result.stdout === "string") {
+          result.stdout = result.stdout.replace(${JSON.stringify(stored)}, ${JSON.stringify(forged)});
+        }
+        return result;
+      };
+      for (const name of ["open", "lstat"]) {
+        const original = fs[name];
+        fs[name] = (file, ...args) => original(
+          String(file) === ${JSON.stringify(path.join(repository, forged))}
+            ? ${JSON.stringify(path.join(repository, stored))} : file, ...args);
+      }
+      syncBuiltinESMExports();
+    ` : "";
     gateGit(repository, "add", "--all");
     gateGit(repository, "commit", "-m", "initial");
 
-    assert.ok(candidateFiles(repository).includes(forged), "the NUL-separated listing lost the path");
+    assert.ok(candidateFiles(repository).includes(stored), "the NUL-separated listing lost the path");
+    assert.deepEqual(candidateFiles(repository, () => ({ status: 0, stdout: `${forged}\u0000` })), [forged]);
 
-    const lint = runGate(repository, "lint.mjs");
+    const lint = runGate(repository, "lint.mjs", preload);
     assert.equal(lint.status, 1, lint.output);
     assert.equal(lint.output.match(/^- /gmu).length, 1, lint.output);
     assert.match(lint.output, /^- "src\/inject\\n- src\/decoy\.mjs:1: no-ts-ignore: forged\.mjs":1: no-ts-ignore/mu);
@@ -1849,8 +1882,19 @@ test("an eligible candidate that is not a regular file is refused, not silently 
 
     // A FIFO is the case that would otherwise hang instead of failing: opening one for reading
     // blocks until a writer arrives, and `O_NONBLOCK` is what turns that into a refusal.
-    const made = spawnSync("mkfifo", [path.join(repository, "src", "pipe.mjs")], { encoding: "utf8" });
-    if (made.status === 0) {
+    if (process.platform === "win32") {
+      const fifo = containedReader({
+        root: repository,
+        lstat: async () => ({
+          isSymbolicLink: () => false, isFile: () => false,
+          isDirectory: () => false, isFIFO: () => true,
+        }),
+        open: async () => { throw new Error("a FIFO must never be opened"); },
+      });
+      await assert.rejects(() => fifo("src/pipe.mjs"), /is a FIFO, and a gate reads regular files/u);
+    } else {
+      const made = spawnSync("mkfifo", [path.join(repository, "src", "pipe.mjs")], { encoding: "utf8" });
+      assert.equal(made.status, 0, made.stderr);
       await assert.rejects(() => read("src/pipe.mjs"), /is a FIFO, and a gate reads regular files/u);
     }
   } finally {

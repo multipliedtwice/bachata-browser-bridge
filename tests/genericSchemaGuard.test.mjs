@@ -6,7 +6,7 @@ import test from "node:test";
 import { createSchemaValidator } from "../dist/content/generic/schemaGuard.js";
 import { parseHealingDecision, parseResponseHealingDecision } from "../dist/content/generic/healing.js";
 
-const healingModule = fileURLToPath(new URL("../dist/content/generic/healing.js", import.meta.url));
+const healingModule = new URL("../dist/content/generic/healing.js", import.meta.url).href;
 const bundle = fileURLToPath(new URL("../dist/generic-content.js", import.meta.url));
 
 // BR-G6-01. A content script is evaluated under the host page's CSP. Denying the Function
