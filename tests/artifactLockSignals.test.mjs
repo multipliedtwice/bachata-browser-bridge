@@ -18,11 +18,12 @@ import test from "node:test";
 import { spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { withoutArtifactLockEnvironment } from "../scripts/lib/artifact-lock.mjs";
 import { removeScratch, scratchRoot } from "./support/scratch.mjs";
 
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("..", import.meta.url));
 const wrapperScript = path.join(root, "scripts", "with-artifact-lock.mjs");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

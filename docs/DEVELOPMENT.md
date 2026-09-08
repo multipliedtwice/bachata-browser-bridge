@@ -38,6 +38,9 @@ Coverage enforces separate thresholds for core logic and production entry script
 
 Load `dist/` unpacked for manual testing.
 
+Icon source: `media/icon.svg`. Regenerate the packaged 128px PNG with
+`rsvg-convert --width 128 --height 128 media/icon.svg --output media/icon.png`.
+
 ### Which gates need a Git checkout
 
 Every command listed above runs in a maintained-source distribution, which carries no VCS

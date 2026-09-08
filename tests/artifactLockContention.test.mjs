@@ -18,7 +18,7 @@ import path from "node:path";
 
 import { removeScratch, scratchRoot } from "./support/scratch.mjs";
 
-const modulePath = path.resolve(new URL("../scripts/lib/artifact-lock.mjs", import.meta.url).pathname);
+const modulePath = new URL("../scripts/lib/artifact-lock.mjs", import.meta.url).href;
 
 const childEnvironment = () => {
   const environment = { ...process.env };

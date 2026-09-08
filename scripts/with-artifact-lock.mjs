@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { artifactLockEnvironment, withArtifactLock } from "./lib/artifact-lock.mjs";
+import { npmInvocation } from "./lib/npmCommand.mjs";
 
 const separator = process.argv.indexOf("--");
 const command = separator >= 0 ? process.argv[separator + 1] : undefined;
@@ -64,7 +65,10 @@ const drainProcessScope = async (pid) => {
 const status = await withArtifactLock(
   (token) =>
     new Promise((resolve, reject) => {
-      const child = spawn(command, args, {
+      const invocation = /^(?:npm|npm\.cmd)$/iu.test(command)
+        ? npmInvocation(args)
+        : { command, args };
+      const child = spawn(invocation.command, invocation.args, {
         env: artifactLockEnvironment(token),
         stdio: "inherit",
         ...(usesProcessGroup ? { detached: true } : {}),

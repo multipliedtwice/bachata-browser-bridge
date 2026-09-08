@@ -4,6 +4,15 @@ import test from "node:test";
 
 const loadJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
+test("the store icon is packaged at its declared dimensions", async () => {
+  const manifest = await loadJson(new URL("../dist/manifest.json", import.meta.url));
+  assert.equal(manifest.icons["128"], "icon.png");
+  const icon = await readFile(new URL("../dist/icon.png", import.meta.url));
+  assert.deepEqual([...icon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(icon.readUInt32BE(16), 128);
+  assert.equal(icon.readUInt32BE(20), 128);
+});
+
 test("built manifest is a minimal ChatGPT and Claude transport", async () => {
   const manifest = await loadJson(new URL("../dist/manifest.json", import.meta.url));
   const packageJson = await loadJson(new URL("../package.json", import.meta.url));

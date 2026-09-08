@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   collectFiles,
@@ -52,7 +53,7 @@ import {
 // Every test works in a scratch directory. Nothing here writes the repository, and the last test
 // in the file checks that.
 
-const repositoryRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const scratch = async () => await scratchRoot("bachata-release-");
 
@@ -181,12 +182,13 @@ test("expected entries are the compiled sources plus the generated assets, and n
 test("manifest references are the concrete paths Chrome will load", () => {
   assert.deepEqual(
     manifestReferences({
+      icons: { "128": "icon.png" },
       background: { service_worker: "background/index.js" },
       action: { default_popup: "popup/index.html" },
       content_scripts: [{ js: ["a.js", "b.js"], css: ["a.css"] }],
       web_accessible_resources: [{ resources: ["asset.png", "images/*"] }],
     }),
-    ["background/index.js", "popup/index.html", "a.js", "b.js", "a.css", "asset.png"],
+    ["icon.png", "background/index.js", "popup/index.html", "a.js", "b.js", "a.css", "asset.png"],
   );
   // A pattern names no single file, so it cannot be checked against the ZIP; a manifest with
   // nothing declared references nothing rather than throwing.

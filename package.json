@@ -2,7 +2,7 @@
   "name": "bachata-browser-bridge",
   "version": "0.6.7",
   "private": true,
-  "description": "Authenticated ChatGPT, Claude, and explicitly bound generic browser-LLM transport for Bachata pipeline runs",
+  "description": "Connect ChatGPT, Claude, and other browser AI chats to the steps in your Bachata workflows in VS Code.",
   "scripts": {
     "lint": "node scripts/lint.mjs",
     "format:check": "node scripts/format-check.mjs",

@@ -18,6 +18,7 @@ export const collectFiles = async (directory, prefix = "") => {
 
 export const generatedAssets = [
   "manifest.json",
+  "icon.png",
   "LICENSE",
   "THIRD_PARTY_NOTICES.txt",
   "popup/index.html",
@@ -47,6 +48,7 @@ const stringList = (value) => (Array.isArray(value) ? value : []);
  * `packagedManifestShapeProblems` rather than crashed on here.
  */
 export const manifestReferences = (manifest) => [
+  ...Object.values(isObject(manifest.icons) ? manifest.icons : {}),
   isObject(manifest.background) ? manifest.background.service_worker : undefined,
   isObject(manifest.action) ? manifest.action.default_popup : undefined,
   ...stringList(manifest.content_scripts)
@@ -82,6 +84,7 @@ export const packagedManifestShapeProblems = (manifest) => {
     }
   };
   objectField("background", manifest.background);
+  objectField("icons", manifest.icons);
   objectField("action", manifest.action);
   listField("content_scripts", manifest.content_scripts).forEach((script, index) => {
     if (!isObject(script)) {

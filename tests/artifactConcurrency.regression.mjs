@@ -4,11 +4,12 @@ import { spawn } from "node:child_process";
 import { access, link, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { withoutArtifactLockEnvironment } from "../scripts/lib/artifact-lock.mjs";
 import { removeScratch, scratchRoot } from "./support/scratch.mjs";
 
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("..", import.meta.url));
 // BB-A4-F21. The lock is the `owner` link inside the directory. The directory itself is created
 // once and kept, so its presence says nothing about whether the lock is held.
 const lockRoot = path.join(root, ".bachata-artifacts.lock");

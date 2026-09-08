@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { byCodeUnit } from "./lib/ordinal.mjs";
+import { npmInvocation } from "./lib/npmCommand.mjs";
 
 // Every distribution of this package carries its own root lockfile, and `npm ci` — the
 // only install continuous integration performs — requires one. A missing lockfile is
@@ -58,8 +59,8 @@ if (mismatched.length > 0) {
   process.exit(1);
 }
 
-const command = process.platform === "win32" ? "npm.cmd" : "npm";
-const result = spawnSync(command, ["ls", "--all", "--package-lock-only"], {
+const invocation = npmInvocation(["ls", "--all", "--package-lock-only"]);
+const result = spawnSync(invocation.command, invocation.args, {
   cwd: process.cwd(),
   stdio: "inherit",
   shell: false,
