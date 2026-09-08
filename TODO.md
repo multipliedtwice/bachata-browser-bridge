@@ -23,8 +23,9 @@ Rules:
 
 ### Release and protocol
 
-- [ ] **BB-AUD-05 / paired release:** execute the release workflow and record the
-  verified pairing. Blocked on: `BRIDGE_ARTIFACT_READ_TOKEN` and a hosted run.
+- [ ] **BB-AUD-05 / paired release:** complete exact-artifact acceptance, then pass
+  the hosted verification phase and marketplace deployment. Configure Chrome item
+  and publishing credentials; retain the verified Bridge ZIP.
 
 ### Popup visual acceptance
 
