@@ -79,7 +79,7 @@ Closed shadow roots, canvas-only conversations, inaccessible cross-origin frames
 
 ## Permissions
 
-Generic binding uses explicit user interaction with `activeTab` and `scripting`, then requests optional host access for exactly the selected HTTP(S) origin. That exact-origin permission allows deterministic re-injection after refresh or browser restart without granting blanket site access. Popup removal deletes only the selected unchanged profile and keeps permission. Revoke site access requires confirmation, reports Chrome refusal, and preserves saved profiles. Active requests block management. The legacy clear-profile operation still clears that origin and requests permission removal. The provider remains constrained to origins the user explicitly bound.
+Generic setup uses `tabs` to identify the selected website, requests optional access for that exact HTTP(S) origin, then injects the setup script with `scripting`. Exact-origin access allows re-injection after refresh or browser restart. Popup removal deletes only the selected unchanged profile and keeps permission. Revoke site access requires confirmation, reports Chrome refusal, and preserves saved profiles. Active requests block management. The legacy clear-profile operation still clears that origin and requests permission removal. The provider remains constrained to origins the user explicitly bound.
 
 
 ## Model selection

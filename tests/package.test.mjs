@@ -20,7 +20,7 @@ test("built manifest is a minimal ChatGPT and Claude transport", async () => {
   assert.equal(manifest.version, packageJson.version);
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "116");
-  assert.deepEqual(manifest.permissions, ["activeTab", "alarms", "clipboardRead", "contextMenus", "favicon", "scripting", "storage", "tabs", "webNavigation"]);
+  assert.deepEqual(manifest.permissions, ["alarms", "clipboardRead", "contextMenus", "favicon", "scripting", "storage", "tabs", "webNavigation"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://chatgpt.com/*",
     "https://claude.ai/*",
@@ -30,6 +30,7 @@ test("built manifest is a minimal ChatGPT and Claude transport", async () => {
     "https://localhost/*",
   ]);
   assert.equal(manifest.background.service_worker, "background/index.js");
+  assert.deepEqual(manifest.optional_host_permissions, ["http://*/*", "https://*/*"]);
   assert.equal(manifest.content_scripts, undefined);
   assert.equal(manifest.background.type, "module");
 });

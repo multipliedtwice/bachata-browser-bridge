@@ -61,7 +61,7 @@ for (const dependency of ["@testing-library/dom", "esbuild"]) {
 }
 
 check("selectedResponse:structuredCode", /selectionToCapturedResponse/.test(markdown) && /anchorCode/.test(markdown) && /type: ["']codeBlock["']/.test(markdown) && /segments: selected\.segments/.test(generic), "manual selected-response recovery preserves code-block language for managed bachata-control when selection remains inside code");
-check("manifest:activeTab", /activeTab/.test(manifestText), "manual binding uses activeTab");
+check("manifest:tabs", manifest.permissions?.includes("tabs"), "manual setup identifies the current tab before requesting exact-origin access");
 check("manifest:scripting", /scripting/.test(manifestText), "generic content is injected after user action");
 check("manifest:storage", /storage/.test(manifestText), "bindings persist locally");
 check("profile:persistent", /chrome\.storage|browser\.storage|storage\.local/.test(profile), "binding profiles persist");
