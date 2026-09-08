@@ -18,7 +18,7 @@ import { removeScratch, scratchRoot } from "./support/scratch.mjs";
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exporter = path.join(root, "scripts", "source-distribution.mjs");
-const { collectMaintainedSourceFiles } = await import(exporter);
+const { collectMaintainedSourceFiles } = await import("../scripts/source-distribution.mjs");
 
 const doesNotExist = async (candidate) => {
   await assert.rejects(access(candidate));

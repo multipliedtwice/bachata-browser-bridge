@@ -328,16 +328,12 @@ Two prior review items remain open; each is owned by the section named.
 
 ## O1: tracked workflow and hosted evidence
 
-Current fact: `.github/workflows/release-gates.yml` tracked. `git remote -v`
-empty. Hosted run not observed.
-
-Blocked: no remote configured, nothing pushed, no hosted run observed. Needs
-repository-owner authorization for a remote destination.
+Canonical public remote: `https://github.com/multipliedtwice/bachata-browser-bridge`.
+Authorized source is pushed. Hosted cross-platform validation is running;
+Windows failures remain under repair. No all-platform pass recorded.
 
 - [ ] Prove the tracked three-OS workflow on an authorized hosted candidate: clean checkout,
   exact Node, `npm ci`, types, no telemetry, tests, coverage, package, source-drift rejection.
-- [ ] Configure remote only with repository-owner authorization. No guessed owner
-  or destination.
 - [ ] After authorized push/PR/tag, observe Ubuntu/macOS/Windows jobs. Record URLs,
   commit SHA, artifact identity, pass/fail. Do not call CI enforced/green before
   observed protected-branch/release behavior.
