@@ -18,6 +18,7 @@ const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const profiles = {
   "bachata-browser-bridge": {
     files: new Set([
+      ".gitattributes",
       ".gitignore",
       "CHANGELOG.md",
       "LICENSE",
