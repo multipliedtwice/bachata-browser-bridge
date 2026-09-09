@@ -24,6 +24,8 @@ Test date:
 
 Verify:
 
+- open and close Connection settings and Other websites, separately and together; width stays stable, bottom controls remain reachable by scroll and keyboard, closing removes extra space;
+- repeat at 380x600 and 320x400; include long site names and saved-binding confirmations. Debug previews: gray page/body background, contrasting popup content. Preview pass does not prove native Chrome popup autosizing;
 - endpoint and token drafts survive polling;
 - Connect to VS Code requires a token and valid local address; Paste & connect reads only a token from the clipboard;
 - connection state and retry controls are accurate;
