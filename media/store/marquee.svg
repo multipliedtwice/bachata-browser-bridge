@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560" role="img" aria-labelledby="title description">
+  <title id="title">Bachata Browser Bridge — browser chats, inside your workflows</title>
+  <desc id="description">Connect your browser chats to the steps you choose in VS Code. An illustrative sequence shows Plan, Write and Review.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="0.6">
+      <stop stop-color="#10251d"/>
+      <stop offset="1" stop-color="#101715"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="560" fill="url(#background)"/>
+  <g fill="none" stroke="#299e68" stroke-width="48" opacity="0.09">
+    <circle cx="1130" cy="290" r="252"/>
+    <circle cx="1280" cy="290" r="252"/>
+  </g>
+  <g transform="translate(55 35) scale(3)" fill="none" stroke="#62d99b" stroke-width="1.5">
+    <path d="M8.75 6.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 1 0 0-11M15.25 6.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 1 0 0-11"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="148" y="69" font-size="32" font-weight="700" fill="#f1f8f3">Bachata</text>
+    <text x="150" y="94" font-size="15" letter-spacing="2" fill="#a6bfb0">BROWSER BRIDGE</text>
+    <text x="64" y="206" font-size="62" font-weight="700" letter-spacing="-2" fill="#f1f8f3">Browser chats,</text>
+    <text x="64" y="274" font-size="62" font-weight="700" letter-spacing="-2" fill="#f1f8f3">inside your</text>
+    <text x="64" y="342" font-size="62" font-weight="700" letter-spacing="-2" fill="#62d99b">workflows.</text>
+    <text x="68" y="401" font-size="22" fill="#b9cec1">Connect your chats to the steps</text>
+    <text x="68" y="433" font-size="22" fill="#b9cec1">you choose in VS Code.</text>
+    <text x="843" y="119" font-size="13" letter-spacing="2" fill="#a6bfb0">ONE POSSIBLE SEQUENCE</text>
+    <g fill="none" stroke="#299e68" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M817 219v58m-5-6 5 6 5-6"/>
+      <path d="M817 331v58m-5-6 5 6 5-6"/>
+    </g>
+    <g fill="#153626" stroke="#62d99b" stroke-width="2">
+      <circle cx="817" cy="192" r="27"/>
+      <circle cx="817" cy="304" r="27"/>
+      <circle cx="817" cy="416" r="27"/>
+    </g>
+    <g font-size="17" font-weight="700" text-anchor="middle" fill="#a4edc2">
+      <text x="817" y="198">1</text>
+      <text x="817" y="310">2</text>
+      <text x="817" y="422">3</text>
+    </g>
+    <g font-size="31" font-weight="700" fill="#f1f8f3">
+      <text x="875" y="187">Plan</text>
+      <text x="875" y="299">Write</text>
+      <text x="875" y="411">Review</text>
+    </g>
+    <g font-size="18" fill="#b9cec1">
+      <text x="875" y="218">Set a direction</text>
+      <text x="875" y="330">Make the change</text>
+      <text x="875" y="442">Check the result</text>
+    </g>
+  </g>
+</svg>

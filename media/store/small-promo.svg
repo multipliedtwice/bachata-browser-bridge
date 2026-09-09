@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280" role="img" aria-labelledby="title description">
+  <title id="title">Bachata Browser Bridge — your chats, your workflow</title>
+  <desc id="description">Connect browser chats to the steps you choose in VS Code. Plan, Write and Review illustrate one possible sequence.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#10251d"/>
+      <stop offset="1" stop-color="#101715"/>
+    </linearGradient>
+  </defs>
+  <rect width="440" height="280" fill="url(#background)"/>
+  <g fill="none" stroke="#299e68" stroke-width="26" opacity="0.10">
+    <circle cx="391" cy="38" r="106"/>
+    <circle cx="454" cy="38" r="106"/>
+  </g>
+  <g transform="translate(23 17) scale(2)" fill="none" stroke="#62d99b" stroke-width="1.5">
+    <path d="M8.75 6.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 1 0 0-11M15.25 6.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 1 0 0-11"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="83" y="39" font-size="23" font-weight="700" fill="#f1f8f3">Bachata</text>
+    <text x="84" y="57" font-size="12" letter-spacing="1.4" fill="#a6bfb0">BROWSER BRIDGE</text>
+    <text x="28" y="111" font-size="35" font-weight="700" letter-spacing="-1" fill="#f1f8f3">Your chats.</text>
+    <text x="28" y="149" font-size="35" font-weight="700" letter-spacing="-1" fill="#62d99b">Your workflow.</text>
+    <text x="29" y="178" font-size="14" fill="#b9cec1">Connect browser chats to the steps</text>
+    <text x="29" y="198" font-size="14" fill="#b9cec1">you choose in VS Code.</text>
+    <g fill="#17382a" stroke="#306448">
+      <rect x="28" y="223" width="106" height="34" rx="17"/>
+      <rect x="167" y="223" width="106" height="34" rx="17"/>
+      <rect x="306" y="223" width="106" height="34" rx="17"/>
+    </g>
+    <g fill="none" stroke="#62d99b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M144 240h13m-5-5 5 5-5 5"/>
+      <path d="M283 240h13m-5-5 5 5-5 5"/>
+    </g>
+    <g font-size="14" font-weight="700" fill="#e1f5e8" text-anchor="middle">
+      <text x="81" y="245">Plan</text>
+      <text x="220" y="245">Write</text>
+      <text x="359" y="245">Review</text>
+    </g>
+  </g>
+</svg>
