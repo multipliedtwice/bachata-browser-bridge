@@ -12,7 +12,7 @@ Once a bound tab is registered, the background worker publishes it as a `generic
 
 ## One-time binding
 
-Open a browser LLM conversation. Popup -> Other websites and saved bindings -> Set up current website -> allow the displayed origin. Setup targets the current browser document; navigation invalidates that request. Close the popup. Use Auto-detect controls, or choose individual controls in the page panel. Context-menu commands remain advanced repair tools.
+Open a browser LLM conversation. Popup -> Other websites -> Set up current website -> allow the displayed origin. Setup targets the current browser document; navigation invalidates that request. Close the popup. Use Auto-detect controls, or choose individual controls in the page panel. Context-menu commands remain advanced repair tools.
 
 Picker: blue outline marks selection. Click an element, or use Up/Down for suggestions,
 Left for parent, Right for first child. Enter saves; Escape cancels. Selection consumes

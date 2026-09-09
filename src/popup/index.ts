@@ -378,8 +378,14 @@ const messageType = (message: unknown): string | undefined => {
 };
 
 const buildDom = () => {
-  const heading = create("h1", { text: "Bachata Browser Bridge" });
-  const subtitle = create("p", { id: "subtitle", className: "subtitle", text: "Bind one ready provider conversation to VS Code." });
+  const heading = create("h1", { text: "Bachata" });
+  const brandLabel = create("p", { className: "brand-label", text: "Browser Bridge" });
+  const brandName = create("div", { className: "brand-name" });
+  brandName.append(heading, brandLabel);
+  const brandIcon = create("img", { className: "brand-icon" });
+  brandIcon.src = "../icon.png";
+  brandIcon.alt = "";
+  const subtitle = create("p", { id: "subtitle", className: "subtitle", text: "Connect your browser chats to workflows in VS Code." });
   const connectionPill = create("button", { id: "connection", className: "pill disconnected" });
   connectionPill.type = "button";
   connectionPill.setAttribute("aria-controls", "connection-section");
@@ -388,7 +394,7 @@ const buildDom = () => {
   connectionState.setAttribute("role", "status");
   connectionState.setAttribute("aria-live", "polite");
   const brand = create("div", { className: "brand" });
-  brand.append(heading, connectionPill, connectionState);
+  brand.append(brandIcon, brandName, connectionPill, connectionState);
   const header = create("header");
   header.append(brand, subtitle);
 
@@ -400,17 +406,22 @@ const buildDom = () => {
 
   const endpointSummary = create("code", { id: "endpoint-summary" });
   const editConnection = create("button", { id: "edit-connection", className: "ghost small", text: "Edit" });
-  const disconnect = create("button", { id: "disconnect", className: "danger small", text: "Disconnect" });
+  const disconnect = create("button", { id: "disconnect", className: "ghost small", text: "Disconnect" });
   const summary = create("div", { id: "connection-summary", className: "connection-summary" });
   summary.append(endpointSummary, editConnection, disconnect);
 
-  const endpointLabel = create("label", { text: "Endpoint" });
+  const endpointLabel = create("label", { text: "Local connection address" });
   endpointLabel.setAttribute("for", "endpoint");
   const endpointInput = create("input", { id: "endpoint" });
   endpointInput.placeholder = canonicalEndpoint;
   endpointInput.autocomplete = "off";
   endpointInput.spellcheck = false;
   const endpointError = create("p", { id: "endpoint-error", className: "field-error" });
+  endpointInput.setAttribute("aria-describedby", "endpoint-hint endpoint-error");
+  const endpointHint = create("p", { id: "endpoint-hint", className: "hint", text: "Change this only if Bachata in VS Code uses a different local address." });
+  const advanced = create("details", { id: "connection-advanced" });
+  advanced.open = false;
+  advanced.append(create("summary", { text: "Connection settings" }), endpointLabel, endpointInput, endpointError, endpointHint);
 
   const tokenLabel = create("label", { text: "Pairing token" });
   tokenLabel.setAttribute("for", "token");
@@ -421,28 +432,33 @@ const buildDom = () => {
   tokenInput.spellcheck = false;
   const tokenPaste = create("button", { id: "token-paste", className: "ghost small", text: "Paste" });
   tokenPaste.type = "button";
-  const tokenPastePair = create("button", { id: "token-paste-pair", className: "ghost small", text: "Paste & Pair" });
+  const tokenPastePair = create("button", { id: "token-paste-pair", className: "primary grow", text: "Paste & connect" });
   tokenPastePair.type = "button";
   const tokenReveal = create("button", { id: "token-reveal", className: "ghost small", text: "Show" });
   tokenReveal.type = "button";
   const tokenActions = create("div", { className: "token-actions" });
-  tokenActions.append(tokenPaste, tokenPastePair, tokenReveal);
+  tokenActions.append(tokenPaste, tokenReveal);
+  const tokenHeading = create("div", { className: "field-heading" });
+  tokenHeading.append(tokenLabel, tokenActions);
   const tokenField = create("div", { className: "token-field" });
-  tokenField.append(tokenInput, tokenActions);
+  tokenField.append(tokenHeading, tokenInput);
   const tokenErrorText = create("p", { id: "token-error", className: "field-error" });
-  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "The token stays in this popup until Pair is accepted." });
+  tokenErrorText.setAttribute("role", "alert");
+  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Copy the pairing token from Bachata’s Browser Bridge settings in VS Code." });
 
-  const pair = create("button", { id: "pair", className: "primary grow", text: "Pair" });
+  tokenInput.setAttribute("aria-describedby", "token-hint token-error");
+  tokenReveal.setAttribute("aria-controls", "token");
+  const pair = create("button", { id: "pair", className: "primary grow", text: "Connect to VS Code" });
   pair.type = "submit";
-  const cancelConnect = create("button", { id: "cancel-connect", className: "danger", text: "Cancel" });
+  const cancelConnect = create("button", { id: "cancel-connect", className: "ghost", text: "Cancel" });
   cancelConnect.type = "button";
   const cancelEdit = create("button", { id: "cancel-edit", className: "ghost", text: "Keep current" });
   cancelEdit.type = "button";
-  const formActions = create("div", { className: "row" });
-  formActions.append(pair, cancelConnect, cancelEdit);
+  const formActions = create("div", { className: "row form-actions" });
+  formActions.append(tokenPastePair, pair, cancelConnect, cancelEdit);
 
   const form = create("form", { id: "pairing-form" });
-  form.append(endpointLabel, endpointInput, endpointError, tokenLabel, tokenField, tokenErrorText, tokenHint, formActions);
+  form.append(tokenHint, tokenField, tokenErrorText, formActions, advanced);
 
   const retryText = create("span", { id: "retry-text" });
   const reconnect = create("button", { id: "reconnect", className: "small", text: "Reconnect now" });
@@ -454,7 +470,7 @@ const buildDom = () => {
   connectionSection.append(connectionNotice, summary, form, retry);
 
   const conversationsHeading = create("h2", { id: "conversations-heading", text: "Conversations" });
-  const refresh = create("button", { id: "refresh", className: "small", text: "Refresh tabs" });
+  const refresh = create("button", { id: "refresh", className: "ghost small", text: "Refresh tabs" });
   const changeConversation = create("button", { id: "change-conversation", className: "ghost small", text: "Change conversation" });
   changeConversation.type = "button";
   const doneChoosing = create("button", { id: "done-choosing", className: "ghost small", text: "Done" });
@@ -469,12 +485,13 @@ const buildDom = () => {
   bindingNotice.setAttribute("role", "alert");
   bindingNotice.append(bindingNoticeText, bindingDismiss);
 
+  const selectionHint = create("p", { id: "selection-hint", className: "hint", text: "Connect to VS Code above to use one of these chats." });
   const empty = create("p", { id: "tabs-empty", className: "hint" });
   const list = create("ul", { id: "tab-list", className: "tab-list" });
   list.setAttribute("aria-labelledby", "conversations-heading");
 
   const conversationsSection = create("section", { id: "conversations-section" });
-  conversationsSection.append(conversationsHead, bindingNotice, empty, list);
+  conversationsSection.append(conversationsHead, bindingNotice, selectionHint, empty, list);
 
   const main = create("main");
   main.append(header, connectionSection, conversationsSection);
@@ -494,6 +511,7 @@ const buildDom = () => {
     disconnect,
     form,
     endpointInput,
+    advanced,
     endpointError,
     tokenInput,
     tokenPaste,
@@ -515,6 +533,7 @@ const buildDom = () => {
     bindingNoticeText,
     bindingDismiss,
     empty,
+    selectionHint,
     list,
   };
 };
@@ -543,10 +562,10 @@ const createRow = (tabId: number): Row => {
   head.append(avatar, title, badge);
 
   const reason = create("p", { className: "tab-reason" });
-  const chip = create("span", { className: "badge bound-chip", text: "Bound" });
-  const bind = create("button", { id: `bind-${String(tabId)}`, className: "primary small", text: "Bind" });
+  const chip = create("span", { className: "badge bound-chip", text: "Selected" });
+  const bind = create("button", { id: `bind-${String(tabId)}`, className: "small", text: "Use this chat" });
   bind.type = "button";
-  const unbind = create("button", { id: `unbind-${String(tabId)}`, className: "danger small", text: "Unbind" });
+  const unbind = create("button", { id: `unbind-${String(tabId)}`, className: "ghost small", text: "Stop using" });
   unbind.type = "button";
   const actions = create("div", { className: "tab-actions" });
   actions.append(chip, unbind, bind);
@@ -563,7 +582,7 @@ const createRow = (tabId: number): Row => {
     void apply({ type: "popup.recover", tabId, action: tab.manualSelectionAvailable ? "selected" : "open" });
   });
   const disclosure = create("details");
-  disclosure.append(create("summary", { text: "Conversation details" }), capabilityDetails, tabInfo, identity);
+  disclosure.append(create("summary", { text: "Details" }), capabilityDetails, tabInfo, identity);
   rowRoot.append(head, meta, capabilities, reason, recovery, recover, actions, disclosure);
 
   bind.addEventListener("click", () => {
@@ -621,15 +640,15 @@ const renderRow = (row: Row, tab: PopupTab, showList: boolean): void => {
   setText(row.recover, tab.manualSelectionAvailable ? "Use selected response" : "Open conversation");
   setDisabled(row.recover, pending);
   const bindable = !bound && state.connected && tab.ready;
-  setClassName(row.bind, tab.recovery || tab.manualSelectionAvailable ? "ghost small" : "primary small");
+  setClassName(row.bind, tab.recovery || tab.manualSelectionAvailable ? "ghost small" : "small");
   setHidden(row.chip, !bound || !showList);
   setHidden(row.unbind, !bound);
   setHidden(row.bind, !bindable);
   setHidden(row.actions, !bound && !bindable);
   setDisabled(row.bind, pending);
   setDisabled(row.unbind, pending);
-  row.bind.setAttribute("aria-label", `Bind ${label} on tab ${String(tab.id)}`);
-  row.unbind.setAttribute("aria-label", `Unbind ${label} on tab ${String(tab.id)}`);
+  row.bind.setAttribute("aria-label", `Use ${label} on tab ${String(tab.id)}`);
+  row.unbind.setAttribute("aria-label", `Stop using ${label} on tab ${String(tab.id)}`);
 };
 
 const focusFallback = (): void => {
@@ -662,6 +681,15 @@ const restoreFocus = (activeId: string): void => {
       if (document.activeElement !== target) {
         target.focus();
       }
+      return;
+    }
+  }
+  if ((activeId === dom.pair.id && dom.pair.hidden)
+    || (activeId === dom.tokenPastePair.id && dom.tokenPastePair.hidden)) {
+    if (!dom.form.hidden && !dom.connectionSection.hidden) {
+      const target = dom.pair.hidden ? dom.tokenPastePair : dom.pair;
+      if (!target.disabled) target.focus();
+      else dom.tokenInput.focus();
       return;
     }
   }
@@ -753,6 +781,8 @@ const render = (): void => {
   setText(dom.endpointError, problem);
   setHidden(dom.endpointError, problem === "");
   dom.endpointInput.classList.toggle("invalid", problem !== "");
+  dom.endpointInput.setAttribute("aria-invalid", problem !== "" ? "true" : "false");
+  if (problem !== "") dom.advanced.open = true;
   setDisabled(dom.endpointInput, pending);
   setDisabled(dom.tokenInput, pending);
   setDisabled(dom.tokenPaste, pending || pasting);
@@ -761,6 +791,13 @@ const render = (): void => {
   setText(dom.tokenErrorText, tokenError);
   setHidden(dom.tokenErrorText, tokenError === "");
   setText(dom.tokenReveal, tokenVisible ? "Hide" : "Show");
+  dom.tokenReveal.setAttribute("aria-label", tokenVisible ? "Hide pairing token" : "Show pairing token");
+  dom.tokenReveal.setAttribute("aria-pressed", tokenVisible ? "true" : "false");
+  dom.tokenInput.setAttribute("aria-invalid", tokenError !== "" ? "true" : "false");
+  setHidden(dom.tokenPastePair, tokenDraft.trim() !== "");
+  setHidden(dom.pair, tokenDraft.trim() === "");
+  setText(dom.tokenPastePair, pasting ? "Reading clipboard…" : pending ? "Please wait…" : "Paste & connect");
+  setText(dom.pair, pending ? "Please wait…" : "Connect to VS Code");
   if (dom.tokenInput.type !== (tokenVisible ? "text" : "password")) {
     dom.tokenInput.type = tokenVisible ? "text" : "password";
   }
@@ -777,7 +814,7 @@ const render = (): void => {
 
   const bound = boundTab();
   const showList = bound === undefined || choosingConversation;
-  setText(dom.conversationsHeading, showList ? "Conversations" : "Bound conversation");
+  setText(dom.conversationsHeading, showList ? "Choose a chat" : "Selected chat");
   setDisabled(dom.refresh, pending);
   setHidden(dom.refresh, !showList);
   setHidden(dom.changeConversation, showList);
@@ -786,7 +823,8 @@ const render = (): void => {
   setDisabled(dom.doneChoosing, pending);
   setClassName(dom.conversationsSection, showList && showConnection ? "" : "roomy");
   const empty = state.tabs.length === 0;
-  setText(dom.empty, empty ? "No provider tabs found. Open ChatGPT or Claude, then select Refresh tabs." : "");
+  setHidden(dom.selectionHint, state.connected || empty);
+  setText(dom.empty, empty ? "Open a ChatGPT or Claude conversation and sign in, then refresh tabs. For another website, use the setup below." : "");
   setHidden(dom.empty, !empty || !showList);
 
   renderNotices();
@@ -937,7 +975,7 @@ dom.tokenPaste.addEventListener("click", () => {
       }
     } catch {
       if (editRevision === tokenEditRevision) {
-        tokenError = "Clipboard unavailable. Paste with Ctrl+V.";
+        tokenError = "Clipboard unavailable. Paste into the token field with ⌘V or Ctrl+V.";
       }
     } finally {
       pasting = false;
@@ -975,7 +1013,7 @@ dom.tokenPastePair.addEventListener("click", () => {
       token = (await withTimeout(navigator.clipboard.readText(), 3_000)).trim();
     } catch {
       if (editRevision === tokenEditRevision && intentRevision === pairingIntentRevision) {
-        tokenError = "Clipboard unavailable. Paste with Ctrl+V, then Pair.";
+        tokenError = "Clipboard unavailable. Paste into the token field with ⌘V or Ctrl+V, then Connect.";
       }
       pasting = false;
       render();
@@ -1026,6 +1064,7 @@ dom.form.addEventListener("submit", (event) => {
 });
 dom.editConnection.addEventListener("click", () => {
   editingConnection = true;
+  dom.advanced.open = true;
   render();
   dom.endpointInput.focus();
 });

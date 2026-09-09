@@ -34,7 +34,7 @@ The popup exposes readiness before selection. The background independently rejec
 
 ## Popup secrets
 
-The one-use pairing token stays in popup memory until Pair succeeds. It is not written into popup state or extension storage. Connection polling preserves the local draft without echoing it through the background.
+The one-use pairing token stays in popup memory until pairing succeeds. It is not written into popup state or extension storage. Connection polling preserves the local draft without echoing it through the background.
 
 The token field is masked until the user presses Show. Clipboard reads happen only on an explicit Paste press and never automatically; a blocked read surfaces an inline message instead of failing silently.
 

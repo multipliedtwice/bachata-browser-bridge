@@ -88,20 +88,18 @@ Do not zip the working directory directly.
    repository root is the maintained source of the manifest, not a loadable extension:
    it references paths that exist only after `npm run build` copies them into `dist/`.
    Loading the repository root in Chrome fails by design.
-2. Open the popup. Until the bridge is paired it opens on the pairing fields.
-3. Paste the endpoint and token shown by Bachata.
-4. Select **Pair**.
-5. Select **Refresh tabs**.
-6. Read the conversation list: each row shows provider, title, tab ID, conversation identity, readiness, and what to do about a non-ready status. The host is shown only when it is not the provider's own.
-7. Select **Bind** on one ready ChatGPT or Claude row.
+2. Copy the pairing token from Bachata’s Browser Bridge settings in VS Code, then open the browser popup.
+3. Select **Paste & connect**. If you paste or type the token into the field yourself, select **Connect to VS Code** instead. The local address is filled in automatically; open **Connection settings** only if VS Code shows a different address.
+4. Open a ChatGPT or Claude conversation, sign in, then select **Refresh tabs**.
+5. Select **Use this chat** on a ready conversation. Each row shows its provider, title, readiness and any limitations; **Details** contains its tab ID and conversation identity.
 
-For another AI chat website, open **Other websites and saved bindings** in the popup, choose **Set up current website**, then allow the displayed origin. Close the popup and use the page setup panel: auto-detect or choose controls, then validate. Composer and conversation region are required; other controls keep their stated limitations when absent. Context-menu commands remain available for advanced repair. A validated generic tab is then published to VS Code as a `generic` Protocol v9 session with explicit submission, completion, interruption, asset, and conversation-certainty capabilities. A profile without verified Send and lifecycle controls remains manual-only and is not eligible for unattended managed execution. Unbound origins are never discovered, and the extension never opens a generic tab. After restart, an existing tab on an explicitly bound origin may be re-injected and re-registered when its exact-origin permission remains granted.
+For another AI chat website, open **Other websites** in the popup, choose **Set up current website**, then allow the displayed origin. Close the popup and use the page setup panel: auto-detect or choose controls, then validate. Composer and conversation region are required; other controls keep their stated limitations when absent. Context-menu commands remain available for advanced repair. A validated generic tab is then published to VS Code as a `generic` Protocol v9 session with explicit submission, completion, interruption, asset, and conversation-certainty capabilities. A profile without verified Send and lifecycle controls remains manual-only and is not eligible for unattended managed execution. Unbound origins are never discovered, and the extension never opens a generic tab. After restart, an existing tab on an explicitly bound origin may be re-injected and re-registered when its exact-origin permission remains granted.
 
 The binding survives popup closes and service-worker restarts, and a Bachata-driven transition to a new conversation in the same tab keeps it. Rebinding is needed only when the binding is invalidated: the tab is closed, it navigates to an unsupported site or another origin, or its conversation is changed by hand.
 
-The popup shows automatic/manual completion and current limitations. Conversation details contains secondary capability and identity fields. Saved bindings can be removed individually; revoking site access requires confirmation and preserves profiles. Recovery shows recorded submission/Stop facts and never replays a prompt. Generic manual selection completes the existing request and may stop generation.
+The popup shows automatic/manual completion and current limitations. **Details** contains secondary capability and identity fields. Saved bindings can be removed individually; revoking site access requires confirmation and preserves profiles. Recovery shows recorded submission/Stop facts and never replays a prompt. Generic manual selection completes the existing request and may stop generation.
 
-The popup settles into a status view. Once a conversation is bound it shows that conversation alone; **Change conversation** reveals the full list and **Done** returns. Selecting the connection status opens the endpoint and token controls, which are otherwise hidden and open on their own whenever the bridge is not connected. Only ready rows carry a Bind control, and none carry one until the bridge is paired. The background worker validates readiness again before binding.
+The popup settles into a status view. Once a conversation is bound it shows that conversation alone; **Change conversation** reveals the full list and **Done** returns. Selecting the connection status opens connection options; **Edit** reveals the token and address fields. When disconnected, the token field appears automatically and **Connection settings** reveals the address. Only ready rows offer **Use this chat**, and only while connected to VS Code. The background worker validates readiness again before binding.
 
 ## Multiple VS Code windows
 

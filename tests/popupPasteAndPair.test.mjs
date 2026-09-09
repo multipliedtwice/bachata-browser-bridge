@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 
 import {
   nextTurn,
@@ -146,45 +145,98 @@ test("Paste & Pair refuses to pair an endpoint edited while the clipboard was re
   }
 });
 
-/**
- * BB-R26-04. Three token controls (Paste, Paste & Pair, Show) share the row, so the input can no
- * longer reserve a fixed two-control gutter that a third control grows past into the caret. The
- * controls are siblings of the input in normal flow, keep their order and their keyboard labels,
- * and the input is the flex child that shrinks. This asserts the structure and the stylesheet
- * contract, not rendered pixels — a DOM mock cannot measure overlap.
- */
-test("the token controls sit in normal flow beside a shrinking input", async () => {
+test("pairing keeps the token separate from actions and exposes one primary action", async () => {
   const restore = installGlobals(async () => state({ connected: false }), async () => "");
   try {
     await import(`../dist/popup/index.js?token-layout=${String(Math.random())}`);
     await nextTurn();
-
     const input = byId("token");
     const field = input.parent;
-    assert.ok(field.classList.contains("token-field"), "the token input left the token field");
-    const actions = field.children.find((child) => child.classList.contains("token-actions"));
-    assert.ok(actions, "the token actions are not a sibling of the input in normal flow");
-    assert.equal(field.children.indexOf(input), 0, "the input is not first in the token field");
-    assert.deepEqual(
-      actions.children.map((button) => button.id),
-      ["token-paste", "token-paste-pair", "token-reveal"],
-      "the token control order changed",
-    );
-    for (const button of actions.children) {
-      assert.equal(button.type, "button", `${button.id} is not a plain button`);
-      assert.ok(button.textContent.trim().length > 0, `${button.id} lost its keyboard label`);
+    assert.equal(field.children.filter((child) => child.tagName === "INPUT").length, 1);
+    assert.equal(field.children.filter((child) => child.tagName === "BUTTON").length, 0,
+      "action buttons must not share the token input's row");
+    assert.equal(input.getAttribute("aria-describedby"), "token-hint token-error");
+    assert.equal(byId("token-reveal").getAttribute("aria-controls"), input.id);
+    for (const id of ["token-paste", "token-paste-pair", "token-reveal"]) {
+      assert.equal(byId(id).type, "button");
+      assert.ok(byId(id).textContent.trim());
     }
-    assert.equal(byId("token-paste").textContent, "Paste");
-    assert.equal(byId("token-paste-pair").textContent, "Paste & Pair");
+    const primary = () => byId("pairing-form").querySelectorAll("button")
+      .filter((button) => button.classList.contains("primary") && !button.hidden);
+    assert.deepEqual(primary().map((button) => button.id), ["token-paste-pair"]);
+    assert.equal(byId("token-paste-pair").disabled, false);
+    type("token", "typed-token");
+    assert.deepEqual(primary().map((button) => button.id), ["pair"]);
+    assert.equal(byId("pair").disabled, false);
+    await click("token-reveal");
+    assert.equal(byId("token-reveal").getAttribute("aria-pressed"), "true");
+    assert.equal(input.type, "text");
+    await click("token-reveal");
+    assert.equal(byId("token-reveal").getAttribute("aria-pressed"), "false");
+    assert.equal(input.type, "password");
+    type("token", "");
+    assert.deepEqual(primary().map((button) => button.id), ["token-paste-pair"]);
+  } finally {
+    restore();
+  }
+});
 
-    const style = readFileSync(new URL("../src/popup/index.html", import.meta.url), "utf8");
-    assert.doesNotMatch(style, /padding-right:\s*108px/u, "the fixed two-control gutter remains");
-    assert.match(style, /\.token-field input\s*\{[^}]*min-width:\s*0/u, "the input does not shrink");
-    assert.doesNotMatch(
-      style,
-      /\.token-actions\s*\{[^}]*position:\s*absolute/u,
-      "the token actions are still absolutely positioned over the input",
-    );
+test("advanced connection settings stay optional but expose an invalid loaded address", async () => {
+  const customEndpoint = "ws://127.0.0.1:50087/bachata-browser-bridge-v9";
+  const restore = installGlobals(async () => state({ endpoint: customEndpoint }));
+  try {
+    await import(`../dist/popup/index.js?advanced-settings=${String(Math.random())}`);
+    await nextTurn();
+    const advanced = byId("connection-advanced");
+    const input = byId("endpoint");
+    assert.equal(advanced.tagName, "DETAILS");
+    assert.equal(advanced.children[0].tagName, "SUMMARY");
+    assert.equal(advanced.open, false);
+    assert.equal(input.value, customEndpoint);
+    assert.equal(input.getAttribute("aria-invalid"), "false");
+    advanced.open = true;
+    input.focus();
+    type("endpoint", "wss://untrusted.example/bridge");
+    assert.equal(advanced.open, true);
+    assert.equal(document.activeElement, input);
+    assert.equal(input.getAttribute("aria-invalid"), "true");
+    assert.match(input.getAttribute("aria-describedby"), /endpoint-error/);
+    assert.equal(byId("endpoint-error").hidden, false);
+    assert.equal(byId("token-paste-pair").disabled, true);
+    type("endpoint", customEndpoint);
+    assert.equal(input.getAttribute("aria-invalid"), "false");
+    assert.equal(advanced.open, true, "state updates must preserve an expanded settings section");
+  } finally {
+    restore();
+  }
+
+  const restoreInvalid = installGlobals(async () => state({ endpoint: "ws://untrusted.example/bridge" }));
+  try {
+    await import(`../dist/popup/index.js?invalid-settings=${String(Math.random())}`);
+    await nextTurn();
+    assert.equal(byId("connection-advanced").open, true);
+    assert.equal(byId("endpoint-error").hidden, false);
+    assert.equal(byId("token-paste-pair").disabled, true);
+  } finally {
+    restoreInvalid();
+  }
+});
+
+test("a clipboard primary replaced by typed-token submit keeps keyboard focus reachable", async () => {
+  const validToken = "a".repeat(43);
+  const restore = installGlobals(async (message) => message.type === "popup.pair"
+    ? { success: false, revision: 1, error: "Token expired. Copy a new token in VS Code." }
+    : state(), async () => validToken);
+  try {
+    await import(`../dist/popup/index.js?primary-focus=${String(Math.random())}`);
+    await nextTurn();
+    byId("token-paste-pair").focus();
+    await click("token-paste-pair");
+    assert.equal(byId("token-paste-pair").hidden, true);
+    assert.equal(byId("pair").hidden, false);
+    assert.equal(document.activeElement.id, "pair");
+    assert.equal(byId("connection-notice").getAttribute("role"), "alert");
+    assert.match(byId("connection-error").textContent, /Token expired/);
   } finally {
     restore();
   }

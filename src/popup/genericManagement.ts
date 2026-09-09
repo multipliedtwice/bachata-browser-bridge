@@ -21,8 +21,8 @@ const request = async (input: Record<string, unknown>): Promise<Record<string, u
 
 export const installGenericManagement = (parent: HTMLElement): void => {
   const section = create("details", { id: "generic-management" });
-  const heading = create("summary", { text: "Other websites and saved bindings" });
-  const note = create("p", { className: "hint", text: "Generic support is configurable and has limitations. Each site needs your permission. One VS Code host owns the connection; model selection stays on the website." });
+  const heading = create("summary", { text: "Other websites" });
+  const note = create("p", { className: "hint", text: "Connect another chat website by choosing its controls. Each site needs your permission; supported actions vary. Choose models on the website." });
   const status = create("p", { id: "generic-status", className: "hint" });
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
@@ -38,7 +38,9 @@ export const installGenericManagement = (parent: HTMLElement): void => {
   const cancel = create("button", { id: "generic-cancel", className: "ghost small", text: "Cancel" });
   confirmation.append(confirmationText, confirm, cancel);
   for (const control of [setup, saved, permission, confirm, cancel]) control.type = "button";
-  section.append(heading, note, setup, saved, permission, status, confirmation, list);
+  const actions = create("div", { className: "management-actions" });
+  actions.append(setup, saved);
+  section.append(heading, note, actions, permission, status, confirmation, list);
   parent.append(section);
   let pending = false;
   let selected: { tabId: number; origin: string } | undefined;
