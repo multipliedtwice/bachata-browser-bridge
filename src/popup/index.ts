@@ -786,7 +786,7 @@ const render = (): void => {
   setDisabled(dom.endpointInput, pending);
   setDisabled(dom.tokenInput, pending);
   setDisabled(dom.tokenPaste, pending || pasting);
-  setDisabled(dom.tokenPastePair, pending || pasting || endpointProblem(endpointDraft) !== "");
+  setDisabled(dom.tokenPastePair, pending || pasting || !endpointDraft.trim() || problem !== "");
   setDisabled(dom.tokenReveal, pending || tokenDraft === "");
   setText(dom.tokenErrorText, tokenError);
   setHidden(dom.tokenErrorText, tokenError === "");

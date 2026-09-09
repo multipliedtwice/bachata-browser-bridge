@@ -183,7 +183,15 @@ test("pairing keeps the token separate from actions and exposes one primary acti
 
 test("advanced connection settings stay optional but expose an invalid loaded address", async () => {
   const customEndpoint = "ws://127.0.0.1:50087/bachata-browser-bridge-v9";
-  const restore = installGlobals(async () => state({ endpoint: customEndpoint }));
+  const messages = [];
+  let clipboardReads = 0;
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state({ endpoint: customEndpoint });
+  }, async () => {
+    clipboardReads += 1;
+    return "a".repeat(43);
+  });
   try {
     await import(`../dist/popup/index.js?advanced-settings=${String(Math.random())}`);
     await nextTurn();
@@ -206,6 +214,14 @@ test("advanced connection settings stay optional but expose an invalid loaded ad
     type("endpoint", customEndpoint);
     assert.equal(input.getAttribute("aria-invalid"), "false");
     assert.equal(advanced.open, true, "state updates must preserve an expanded settings section");
+    type("endpoint", "   ");
+    assert.equal(byId("token-paste-pair").disabled, true);
+    byId("token-paste-pair").fire("click");
+    await nextTurn();
+    assert.equal(clipboardReads, 0, "an empty endpoint must not consume clipboard contents");
+    assert.equal(messages.some((message) => message.type === "popup.pair"), false);
+    type("endpoint", customEndpoint);
+    assert.equal(byId("token-paste-pair").disabled, false);
   } finally {
     restore();
   }
