@@ -43,7 +43,9 @@ Keep the checklist result with the release work. Do not add analytics, crash rep
 
 ## Observed automated validation
 
-2026-09-08: [Release gates run 34199689556](https://github.com/multipliedtwice/bachata-browser-bridge/actions/runs/34199689556)
-passed on Ubuntu, macOS and Windows. Source: `5ae4436107bf5b4d14ccd4ac8d1a9865febc366a`.
+2026-09-09: [Release gates run 34318194611](https://github.com/multipliedtwice/bachata-browser-bridge/actions/runs/34318194611)
+passed on Ubuntu, macOS and Windows. Source: `239352b43806bfff6939ae8680281e3dfa488c86`.
 Clean lockfile install, types, lint, format, no telemetry, tests, coverage, package and
-source-drift checks passed. Live-provider and exact-package visual acceptance remain open.
+source-drift checks passed. Test and packaging runs each: Linux/macOS 1212 passed;
+Windows 1210 passed, two POSIX-only skips. Zero failures or cancellations. Skips
+are not passes. Live-provider and exact-package visual acceptance remain open.

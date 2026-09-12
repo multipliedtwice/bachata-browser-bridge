@@ -24,13 +24,16 @@ Test date:
 
 Verify:
 
+- open and close Connection settings and Other websites, separately and together; width stays stable, bottom controls remain reachable by scroll and keyboard, closing removes extra space;
+- repeat at 380x600 and 380x400; include long site names and saved-binding confirmations. Debug previews: gray page/body background, contrasting popup content. Preview pass does not prove native Chrome popup autosizing;
+- reopen the native popup repeatedly; initial sizing must request 380px even from a tiny provisional viewport. A 40px preview frame must retain 380px content width, not squeeze the layout to 40px;
 - endpoint and token drafts survive polling;
-- Pair requires both fields;
+- Connect to VS Code requires a token and valid local address; Paste & connect reads only a token from the clipboard;
 - connection state and retry controls are accurate;
 - Refresh tabs lists both providers; Conversation details reveals tab ID and conversation identity;
 - capability summary distinguishes manual completion, unavailable Stop and uncertain conversation state;
-- unauthenticated, busy, failed, and not-ready tabs stay listed with their reason and carry no Bind control;
-- no row carries a Bind control until the bridge is paired;
+- unauthenticated, busy, failed, and not-ready tabs stay listed with their reason and carry no Use this chat control;
+- no row carries a Use this chat control until the bridge is paired;
 - a ready tab can be bound and remains bound after refresh;
 - after binding, the list collapses to the bound conversation and Change conversation reopens it;
 - the connection controls stay hidden while connected and open from the status control;
@@ -40,7 +43,7 @@ Verify:
 
 ## Generic setup and recovery UI
 
-- Use Other websites and saved bindings with keyboard focus and zoom at 372px width.
+- Use Other websites with keyboard focus and enlarged text at the fixed 380px popup width.
 - Deny site permission: no setup or prompt starts. Grant the displayed origin: setup opens only
   in the selected document. Navigation during setup dispatch must refuse the stale target.
 - Auto-detect with the configured local model; test unavailable model and ambiguous controls.

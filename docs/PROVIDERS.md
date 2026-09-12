@@ -99,7 +99,7 @@ Session states:
 
 A provider tab without a valid registered document is shown as not inspected.
 
-The popup lists every discovered tab with its own status, and listing never changes the current binding. Only a `ready` row carries a bind action at all, and only while the bridge is paired. Unbind is offered only on the bound row. Once a conversation is bound the list collapses to that conversation until Change conversation is selected. Provisioning succeeds only after a matching session reports `ready`.
+The popup lists every discovered tab with its own status, and listing never changes the current binding. Only a `ready` row carries a bind action at all, and only while the bridge is paired. Stop using is offered only on the selected row. Once a conversation is bound the list collapses to that conversation until Change conversation is selected. Provisioning succeeds only after a matching session reports `ready`.
 
 Generic page-wide Attach and Upload controls are ignored. Attachment controls and inputs must belong to the active composer. ChatGPT may additionally use its exact `composer-button-file-upload` control when the provider renders that control outside the form. Claude Send and Stop controls must belong to the active composer region. Ambiguous or unrelated controls are rejected without modification.
 

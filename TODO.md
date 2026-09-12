@@ -24,15 +24,15 @@ Rules:
 ### Release and protocol
 
 - [ ] **BB-AUD-05 / paired release:** complete exact-artifact acceptance, then pass
-  the hosted verification phase and marketplace deployment. Configure Chrome item
-  and publishing credentials; retain the verified Bridge ZIP.
+  the hosted verification phase and marketplace deployment. Await Chrome review;
+  preserve the submitted Bridge ZIP and verify the replacement independently.
 
 ### Popup visual acceptance
 
-- [ ] **BB-R26-04 / rendered popup:** verify the packaged popup at 372px width,
-  hidden/revealed token, keyboard focus and zoom. Check token text/caret and all three
-  controls remain separate and usable. DOM/CSS checks cannot prove rendered geometry.
-  Current browser tool rejects local preview; authorized graphical validation still needed.
+- [ ] **BB-R26-04 / rendered popup:** verify native startup at fixed 380px width,
+  hidden/revealed token, keyboard focus and zoom against the release package. Open
+  and close both disclosures; verify bottom controls and shrink behavior. Local
+  previews passed; native Chrome popup autosizing remains unconfirmed.
 
 ## UI verification and acceptance
 
@@ -41,9 +41,9 @@ Rules:
 - [ ] **E2 / real-page setup accessibility:** verify picker outline, scroll/resize,
   arrow selection of nonfocusable controls, Enter without Send activation, Escape,
   restored setup focus, screen reader and zoom against the exact package.
-- [ ] Complete `docs/LIVE_SMOKE_TEST.md` against the new package, including 372px layout,
-  zoom, focus, permissions and real-page setup. Local browser preview remains rejected;
-  do not substitute another browser/CDP/headless route.
+- [ ] Complete `docs/LIVE_SMOKE_TEST.md` against the new package, including 380px layout,
+  zoom, focus, permissions and real-page setup. Simulated local previews do not
+  supply exact-package or authenticated-provider acceptance.
 
 ## E5 / independent response fidelity
 

@@ -86,8 +86,8 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.match(byId("tab-list").textContent, /Untitled conversation/);
     assert.match(byId("tab-list").textContent, /Generic/);
     assert.match(byId("tab-list").textContent, /tab 13/);
-    assert.equal(byId("bind-7").getAttribute("aria-label"), "Bind Ready chat on tab 7");
-    assert.equal(byId("unbind-7").getAttribute("aria-label"), "Unbind Ready chat on tab 7");
+    assert.equal(byId("bind-7").getAttribute("aria-label"), "Use Ready chat on tab 7");
+    assert.equal(byId("unbind-7").getAttribute("aria-label"), "Stop using Ready chat on tab 7");
     byId("favicon-8").fire("error");
     assert.equal(byId("favicon-8").hidden, true);
 
@@ -160,14 +160,14 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.equal(document.activeElement.id, "unbind-7");
     assert.equal(byId("bind-7").hidden, true);
     assert.equal(byId("unbind-7").hidden, false);
-    assert.equal(byId("conversations-heading").textContent, "Bound conversation");
+    assert.equal(byId("conversations-heading").textContent, "Selected chat");
     assert.equal(byId("change-conversation").hidden, false);
     assert.equal(byId("refresh").hidden, true);
     assert.equal(byId("tab-list").children[1].hidden, true);
     assert.equal(byId("tab-list").children[0].hidden, false);
 
     await click("change-conversation");
-    assert.equal(byId("conversations-heading").textContent, "Conversations");
+    assert.equal(byId("conversations-heading").textContent, "Choose a chat");
     assert.equal(byId("tab-list").children[1].hidden, false);
     assert.equal(byId("done-choosing").hidden, false);
     assert.equal(byId("refresh").hidden, false);
@@ -217,7 +217,7 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.equal(byId("retry-text").textContent, "Retrying in 5s");
     assert.equal(byId("cancel-connect").hidden, false);
     assert.equal(byId("tabs-empty").hidden, false);
-    assert.match(byId("tabs-empty").textContent, /No provider tabs found/);
+    assert.match(byId("tabs-empty").textContent, /Open a ChatGPT or Claude conversation/);
     assert.equal(byId("subtitle").hidden, false);
 
     await click("reconnect");

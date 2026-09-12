@@ -25,10 +25,13 @@ type QueueWaiter = {
 
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_QUEUE = 4;
+// No model is assumed. The extension resolves which local model this machine actually has and
+// sends it; until then there is nothing to heal with, and saying so is better than asking a server
+// for a model nobody confirmed is installed.
 let configured: BrowserLocalModelConfig = {
   enabled: false,
   backend: "auto",
-  model: "prism-ml/Bonsai-27B-mlx-1bit",
+  model: "",
   timeoutMs: 30_000,
 };
 let active = false;
@@ -183,7 +186,11 @@ const ollama = async (prompt: string, config: PromptConfig, deadlineAt: number, 
 const resolveConfig = (): PromptConfig => {
   if (!configured.enabled) throw new Error("Browser selector healing is disabled in Bachata settings");
   const model = configured.model.trim();
-  if (!model) throw new Error("A local model must be configured for selector healing");
+  if (!model) {
+    throw new Error(
+      "No local model is available for selector healing. Bachata selects one from your Ollama or LM Studio installation; start one, or set a model in Bachata settings.",
+    );
+  }
   return {
     backend: configured.backend,
     ...(configured.endpoint?.trim() ? { endpoint: configured.endpoint.trim() } : {}),

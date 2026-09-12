@@ -20,6 +20,6 @@ The popup renders provider icons from Chrome's local favicon cache through the `
 
 The `webNavigation` permission reports that a bound tab navigated — the tab, the frame, the document identity and the URL — and nothing about page content. Nothing from it is stored: it is read, matched against the bound conversation, and discarded. It replaced a permanent poll of the page's own URL.
 
-The `clipboardRead` permission is used only when the user presses Paste or Paste & Pair in the popup. The clipboard value is read once into the popup's in-memory pairing draft, is never written to extension storage, and is discarded when pairing succeeds or the popup closes. Successful pairing exchanges the short-lived pairing token for the persistent connection token described above.
+The `clipboardRead` permission is used only when the user presses a clipboard paste control in the popup. The clipboard value is read once into the popup's in-memory pairing draft, is never written to extension storage, and is discarded when pairing succeeds or the popup closes. Successful pairing exchanges the short-lived pairing token for the persistent connection token described above.
 
 No analytics, usage metrics, crash reports, remote logs, fingerprints, or install IDs are sent.
