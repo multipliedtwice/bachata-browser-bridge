@@ -53,7 +53,7 @@ const enabled = (overrides = {}) => {
   setLocalModelConfig({
     enabled: true,
     backend: "auto",
-    model: "prism-ml/Bonsai-27B-mlx-1bit",
+    model: "qwen2.5-coder:7b",
     timeoutMs: 30_000,
     ...overrides,
   });
@@ -169,7 +169,7 @@ test("a blank model name is refused", async () => {
     async () => {
       enabled({ model: "   " });
       const { answered } = ask(prompt());
-      assert.match((await answered).error, /local model must be configured/u);
+      assert.match((await answered).error, /No local model is available for selector healing/u);
     },
   );
 });
@@ -479,6 +479,61 @@ test("a real loopback 200 still succeeds through the platform fetch", async () =
       const { answered } = ask(prompt());
       assert.deepEqual(await answered, { ok: true, text: "{\"ok\":true}" });
     });
+  } finally {
+    await close(server);
+  }
+});
+
+test("the bridge ships no default model and refuses until the extension resolves one", async () => {
+  // A fresh proxy has been told nothing. Healing must not invent a model that may not be installed.
+  await withGlobals(nativeFetch, async () => {
+    setLocalModelConfig({ enabled: true, backend: "auto", model: "", timeoutMs: 30_000 });
+    const response = await new Promise((resolve) => {
+      handleLocalModelPromptMessage(
+        { type: "BACHATA_LOCAL_MODEL_PROMPT", requestId: "no-model", prompt: "{}" },
+        { id: extensionId },
+        resolve,
+      );
+    });
+    assert.equal(response.ok, false);
+    assert.match(response.error, /No local model is available for selector healing/u);
+    assert.match(response.error, /Ollama or LM Studio/u, "the message names the remedy");
+  });
+});
+
+test("the bridge heals with exactly the backend, endpoint and model the extension resolved", async () => {
+  // What the extension's shared resolution sends is what the bridge asks for — no re-selection.
+  const seen = [];
+  const server = await listen((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      seen.push({ url: request.url, model: JSON.parse(body).model });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: { content: "{}" } }));
+    });
+  });
+  try {
+    const { port } = server.address();
+    await withGlobals(nativeFetch, async () => {
+      setLocalModelConfig({
+        enabled: true,
+        backend: "ollama",
+        endpoint: `http://127.0.0.1:${String(port)}`,
+        model: "deepseek-r1:8b",
+        timeoutMs: 5_000,
+      });
+      const response = await new Promise((resolve) => {
+        handleLocalModelPromptMessage(
+          { type: "BACHATA_LOCAL_MODEL_PROMPT", requestId: "shared-config", prompt: "{}" },
+          { id: extensionId },
+          resolve,
+        );
+      });
+      assert.equal(response.ok, true);
+    });
+    assert.deepEqual(seen.map((entry) => entry.model), ["deepseek-r1:8b"]);
+    assert.match(seen[0].url, /\/api\/chat$/u);
   } finally {
     await close(server);
   }
