@@ -8,9 +8,12 @@ import {
   awaitSessionOnTab,
   freshGenericVerdict,
   openedSessionRefusal,
+  planConversationReopen,
   pollUntilSettled,
+  provisionedSessionRefusal,
   reopenConversationPlan,
   reopenedSessionRefusal,
+  reopenShortcut,
   providerTabIsLoaded,
   selectGenericSession,
   sessionForProviderTab,
@@ -549,4 +552,49 @@ test("a reopened tab must come back ready on the conversation it was sent to", (
   const moved = reopenedSessionRefusal({ session: session({ conversationIdentity: "chatgpt:https://chatgpt.com/" }), conversationIdentity: previous });
   assert.equal(moved?.code, "OPEN_CONVERSATION_FAILED");
   assert.match(moved?.message ?? "", /previous provider conversation could not be reopened/u);
+});
+
+test("a reopen plan reads sessions only when a previous conversation is named", async () => {
+  let reads = 0;
+  const readSessions = async () => {
+    reads += 1;
+    return [session({ provider: "chatgpt", conversationIdentity: previous })];
+  };
+  assert.deepEqual(
+    await planConversationReopen({ provider: "chatgpt", fresh: true, preferredConversationIdentity: previous, readSessions, signal: openSignal }),
+    { kind: "none" },
+  );
+  assert.deepEqual(
+    await planConversationReopen({ provider: "chatgpt", fresh: false, readSessions, signal: openSignal }),
+    { kind: "none" },
+  );
+  assert.equal(reads, 0);
+  const plan = await planConversationReopen({ provider: "chatgpt", fresh: false, preferredConversationIdentity: previous, readSessions, signal: openSignal });
+  assert.equal(plan.kind, "reuse");
+  assert.equal(reads, 1);
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(
+    planConversationReopen({ provider: "chatgpt", fresh: false, preferredConversationIdentity: previous, readSessions, signal: aborted.signal }),
+  );
+});
+
+test("only a reuse or a refusal short-circuits provisioning", () => {
+  const ready = session({ provider: "chatgpt" });
+  assert.deepEqual(reopenShortcut({ kind: "reuse", session: ready }), { success: true, session: ready });
+  assert.deepEqual(
+    reopenShortcut({ kind: "refuse", refusal: { code: "PROVIDER_NOT_READY", message: "busy" } }),
+    { success: false, code: "PROVIDER_NOT_READY", message: "busy" },
+  );
+  assert.equal(reopenShortcut({ kind: "none" }), undefined);
+  assert.equal(reopenShortcut({ kind: "navigate", url: "https://chatgpt.com/c/x", conversationIdentity: "chatgpt:https://chatgpt.com/c/x" }), undefined);
+});
+
+test("a navigated tab is judged by the conversation it was sent to, any other by readiness", () => {
+  const elsewhere = session({ provider: "chatgpt", conversationIdentity: "chatgpt:https://chatgpt.com/c/other" });
+  assert.equal(
+    provisionedSessionRefusal({ session: elsewhere, plan: { kind: "navigate", url: "https://chatgpt.com/c/x", conversationIdentity: previous } })?.code,
+    "OPEN_CONVERSATION_FAILED",
+  );
+  assert.equal(provisionedSessionRefusal({ session: elsewhere, plan: { kind: "none" } }), undefined);
 });

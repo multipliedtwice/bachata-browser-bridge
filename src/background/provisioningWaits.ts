@@ -354,3 +354,37 @@ export const reopenedSessionRefusal = (input: {
         code: "OPEN_CONVERSATION_FAILED",
         message: "The previous provider conversation could not be reopened",
       });
+
+export const planConversationReopen = async (input: {
+  provider: BrowserProvider;
+  fresh: boolean;
+  preferredConversationIdentity?: string | undefined;
+  readSessions: () => Promise<BrowserSession[]>;
+  signal: AbortSignal;
+}): Promise<ReopenConversationPlan> => {
+  if (input.fresh || input.preferredConversationIdentity === undefined) return { kind: "none" };
+  const plan = reopenConversationPlan({
+    provider: input.provider,
+    fresh: input.fresh,
+    preferredConversationIdentity: input.preferredConversationIdentity,
+    sessions: await input.readSessions(),
+  });
+  throwIfAborted(input.signal);
+  return plan;
+};
+
+export const reopenShortcut = (
+  plan: ReopenConversationPlan,
+): { success: true; session: BrowserSession } | ({ success: false } & ProvisioningRefusal) | undefined => {
+  if (plan.kind === "reuse") return { success: true, session: plan.session };
+  if (plan.kind === "refuse") return { success: false, ...plan.refusal };
+  return undefined;
+};
+
+export const provisionedSessionRefusal = (input: {
+  session: BrowserSession;
+  plan: ReopenConversationPlan;
+}): ProvisioningRefusal | undefined =>
+  input.plan.kind === "navigate"
+    ? reopenedSessionRefusal({ session: input.session, conversationIdentity: input.plan.conversationIdentity })
+    : openedSessionRefusal({ session: input.session, recycled: false });

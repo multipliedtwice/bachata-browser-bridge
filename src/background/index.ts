@@ -72,10 +72,10 @@ import {
   awaitProviderSession,
   freshGenericVerdict,
   openedSessionRefusal,
-  reopenConversationPlan,
-  reopenedSessionRefusal,
+  planConversationReopen,
+  provisionedSessionRefusal,
+  reopenShortcut,
   selectGenericSession,
-  type ReopenConversationPlan,
 } from "./provisioningWaits.js";
 import {
   isIsoDate,
@@ -634,18 +634,9 @@ const provisionProviderConversation = async (
       }
       return { provider, success: true, session: verdict.session };
     }
-    let reopen: ReopenConversationPlan = { kind: "none" };
-    if (!fresh && preferredConversationIdentity !== undefined) {
-      reopen = reopenConversationPlan({
-        provider,
-        fresh,
-        preferredConversationIdentity,
-        sessions: await buildSessions(),
-      });
-      throwIfAborted(signal);
-    }
-    if (reopen.kind === "reuse") return { provider, success: true, session: reopen.session };
-    if (reopen.kind === "refuse") return { provider, success: false, ...reopen.refusal };
+    const reopen = await planConversationReopen({ provider, fresh, preferredConversationIdentity, readSessions: buildSessions, signal });
+    const shortcut = reopenShortcut(reopen);
+    if (shortcut) return { provider, ...shortcut };
     if (fresh && preferredTabId !== undefined) {
       const reusable = await chrome.tabs.get(preferredTabId).catch(() => undefined);
       // BB-A4-F10. The signal is read again here because the lookup is an await: a Disconnect
@@ -713,9 +704,7 @@ const provisionProviderConversation = async (
     });
     throwIfAborted(signal);
     await sendProviderStatus();
-    const openedRefusal = reopen.kind === "navigate"
-      ? reopenedSessionRefusal({ session, conversationIdentity: reopen.conversationIdentity })
-      : openedSessionRefusal({ session, recycled: false });
+    const openedRefusal = provisionedSessionRefusal({ session, plan: reopen });
     if (openedRefusal) {
       if (reopen.kind === "navigate") await closeCreatedTab(createdTabId);
       return { provider, success: false, ...openedRefusal };

@@ -6489,6 +6489,44 @@ test("an open naming a conversation already ready in a tab reuses that tab", asy
   }
 });
 
+// A tab still on that conversation but not ready is refused rather than joined by a second tab
+// on the same conversation.
+test("an open naming a conversation whose tab is not ready is refused without opening a tab", async () => {
+  const harness = await registeredDocumentHarness("reopen-refuse");
+  try {
+    harness.setTabMessageHandler(async (_tabId, message) => message?.type === "provider.status"
+      ? {
+          status: "streaming",
+          documentToken: harness.documentToken,
+          conversationUrl: harness.providerUrl,
+          conversationIdentity: `chatgpt:${harness.providerUrl}`,
+          conversationState: "confirmed",
+        }
+      : { success: true });
+    const socket = await harness.pair();
+    const before = harness.tabCalls.length;
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "provider.openConversation",
+        protocolVersion: 9,
+        requestId: "reopen-refuse",
+        provider: "chatgpt",
+        preferredConversationIdentity: `chatgpt:${harness.providerUrl}`,
+      }),
+    });
+    for (let turn = 0; turn < 20; turn += 1) await nextTurn();
+    const result = socket.sent.find((frame) => frame.requestId === "reopen-refuse");
+    assert.equal(result?.success, false, JSON.stringify(result));
+    assert.equal(result.code, "PROVIDER_NOT_READY");
+    assert.deepEqual(
+      harness.tabCalls.slice(before).filter((entry) => entry.call === "create" || entry.call === "update"),
+      [],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
 // With no tab on that conversation, the tab it opens goes to the conversation itself rather than
 // to the provider's new-chat page.
 test("an open naming a conversation with no tab opens that conversation's URL", async () => {
