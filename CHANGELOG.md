@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.8
 
 - Popup explains completion, Stop, assets and conversation certainty from session capabilities.
   Secondary identity and capability fields sit in Conversation details.
