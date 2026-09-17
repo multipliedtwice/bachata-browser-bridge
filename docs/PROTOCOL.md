@@ -39,6 +39,8 @@ Every open request has a stable `requestId`.
 - disconnect: cancel outstanding operations;
 - failed created tab: retain.
 
+A non-fresh ChatGPT or Claude open that names a `preferredConversationIdentity` for a real conversation returns to that conversation. A ready tab already on it is reused. A tab on it that is not ready is refused with `PROVIDER_NOT_READY`, so a second tab never races the first. Otherwise a tab opens on the conversation URL and must report the same identity; on a mismatch, such as a deleted conversation, that tab is closed and the open is refused with `OPEN_CONVERSATION_FAILED`. The provider's conversation history stays available to the next turn.
+
 Provisioning is outside the serialized WebSocket control queue.
 
 ## Conversation binding

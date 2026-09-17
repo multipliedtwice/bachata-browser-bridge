@@ -393,7 +393,7 @@ export const parseServerMessage = (value: unknown): ServerMessage => {
       typeof value.enabled !== "boolean" ||
       (value.backend !== "auto" && value.backend !== "lmstudio" && value.backend !== "ollama") ||
       (value.endpoint !== undefined && typeof value.endpoint !== "string") ||
-      !isNonEmptyString(value.model) ||
+      typeof value.model !== "string" ||
       !isPositiveInteger(value.timeoutMs)
     ) {
       throw new Error("Invalid localModel.config message");

@@ -7,7 +7,7 @@
  * The Chrome calls stay in the service-worker entry; what their answers mean is decided here.
  */
 import type { BrowserProvider, BrowserSession } from "../protocol/types.js";
-import { providerForUrl } from "./conversation.js";
+import { isSupportedInitialTransitionStart, providerForUrl } from "./conversation.js";
 import { abortableDelay, throwIfAborted } from "./cancellation.js";
 
 export type ProvisioningRefusalCode =
@@ -299,3 +299,58 @@ export const openedSessionRefusal = (input: {
   }
   return undefined;
 };
+
+export type ReopenConversationPlan =
+  | { kind: "none" }
+  | { kind: "reuse"; session: BrowserSession }
+  | { kind: "navigate"; url: string; conversationIdentity: string }
+  | { kind: "refuse"; refusal: ProvisioningRefusal };
+
+/**
+ * Decides whether a non-fresh open returns the caller to the conversation it was bound to. A
+ * built-in provider identity is the provider name and the canonical conversation URL, so a lost
+ * tab can be reopened on that URL and keep the provider's own history.
+ */
+export const reopenConversationPlan = (input: {
+  provider: BrowserProvider;
+  fresh: boolean;
+  preferredConversationIdentity?: string | undefined;
+  sessions: readonly BrowserSession[];
+}): ReopenConversationPlan => {
+  const identity = input.preferredConversationIdentity;
+  if (input.fresh || input.provider === "generic" || !identity?.startsWith(`${input.provider}:`)) {
+    return { kind: "none" };
+  }
+  const url = identity.slice(input.provider.length + 1);
+  if (providerForUrl(url) !== input.provider || isSupportedInitialTransitionStart(input.provider, url)) {
+    return { kind: "none" };
+  }
+  const open = input.sessions.filter(
+    (session) => session.provider === input.provider && session.conversationIdentity === identity,
+  );
+  const ready = open.find((session) => session.status === "ready");
+  if (ready) return { kind: "reuse", session: ready };
+  const [busy] = open;
+  if (busy) {
+    return {
+      kind: "refuse",
+      refusal: {
+        code: "PROVIDER_NOT_READY",
+        message: `The previous provider conversation is open but ${busy.status}`,
+      },
+    };
+  }
+  return { kind: "navigate", url, conversationIdentity: identity };
+};
+
+export const reopenedSessionRefusal = (input: {
+  session: BrowserSession;
+  conversationIdentity: string;
+}): ProvisioningRefusal | undefined =>
+  openedSessionRefusal({ session: input.session, recycled: false })
+  ?? (input.session.conversationIdentity === input.conversationIdentity
+    ? undefined
+    : {
+        code: "OPEN_CONVERSATION_FAILED",
+        message: "The previous provider conversation could not be reopened",
+      });

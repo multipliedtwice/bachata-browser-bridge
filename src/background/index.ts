@@ -72,7 +72,10 @@ import {
   awaitProviderSession,
   freshGenericVerdict,
   openedSessionRefusal,
+  reopenConversationPlan,
+  reopenedSessionRefusal,
   selectGenericSession,
+  type ReopenConversationPlan,
 } from "./provisioningWaits.js";
 import {
   isIsoDate,
@@ -631,6 +634,18 @@ const provisionProviderConversation = async (
       }
       return { provider, success: true, session: verdict.session };
     }
+    let reopen: ReopenConversationPlan = { kind: "none" };
+    if (!fresh && preferredConversationIdentity !== undefined) {
+      reopen = reopenConversationPlan({
+        provider,
+        fresh,
+        preferredConversationIdentity,
+        sessions: await buildSessions(),
+      });
+      throwIfAborted(signal);
+    }
+    if (reopen.kind === "reuse") return { provider, success: true, session: reopen.session };
+    if (reopen.kind === "refuse") return { provider, success: false, ...reopen.refusal };
     if (fresh && preferredTabId !== undefined) {
       const reusable = await chrome.tabs.get(preferredTabId).catch(() => undefined);
       // BB-A4-F10. The signal is read again here because the lookup is an await: a Disconnect
@@ -672,7 +687,7 @@ const provisionProviderConversation = async (
       }
     }
     const tab = await chrome.tabs.create({
-      url: providerStartUrl(provider),
+      url: reopen.kind === "navigate" ? reopen.url : providerStartUrl(provider),
       active: false,
     });
     if (!Number.isInteger(tab.id)) {
@@ -698,8 +713,11 @@ const provisionProviderConversation = async (
     });
     throwIfAborted(signal);
     await sendProviderStatus();
-    const openedRefusal = openedSessionRefusal({ session, recycled: false });
+    const openedRefusal = reopen.kind === "navigate"
+      ? reopenedSessionRefusal({ session, conversationIdentity: reopen.conversationIdentity })
+      : openedSessionRefusal({ session, recycled: false });
     if (openedRefusal) {
+      if (reopen.kind === "navigate") await closeCreatedTab(createdTabId);
       return { provider, success: false, ...openedRefusal };
     }
     return { provider, success: true, session };

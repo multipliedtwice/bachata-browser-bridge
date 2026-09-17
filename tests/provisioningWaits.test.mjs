@@ -9,6 +9,8 @@ import {
   freshGenericVerdict,
   openedSessionRefusal,
   pollUntilSettled,
+  reopenConversationPlan,
+  reopenedSessionRefusal,
   providerTabIsLoaded,
   selectGenericSession,
   sessionForProviderTab,
@@ -467,4 +469,84 @@ test("a wait with no clock supplied reads the real one", async () => {
     signal: openSignal,
   });
   assert.equal(answered.tabId, 7);
+});
+
+const previous = "chatgpt:https://chatgpt.com/c/previous";
+
+test("a fresh, generic or unnamed open never reopens a previous conversation", () => {
+  const sessions = [session({ provider: "chatgpt", conversationIdentity: previous })];
+  assert.deepEqual(
+    reopenConversationPlan({ provider: "chatgpt", fresh: true, preferredConversationIdentity: previous, sessions }),
+    { kind: "none" },
+  );
+  assert.deepEqual(
+    reopenConversationPlan({ provider: "generic", fresh: false, preferredConversationIdentity: previous, sessions }),
+    { kind: "none" },
+  );
+  assert.deepEqual(reopenConversationPlan({ provider: "chatgpt", fresh: false, sessions }), { kind: "none" });
+});
+
+test("an identity that is not a real conversation of the provider is not reopened", () => {
+  for (const [provider, identity] of [
+    ["chatgpt", "claude:https://claude.ai/chat/previous"],
+    ["chatgpt", "chatgpt:https://claude.ai/chat/previous"],
+    ["chatgpt", "chatgpt:https://chatgpt.com/"],
+    ["claude", "claude:https://claude.ai/new"],
+    ["chatgpt", "chatgpt:not a url"],
+  ]) {
+    assert.deepEqual(
+      reopenConversationPlan({ provider, fresh: false, preferredConversationIdentity: identity, sessions: [] }),
+      { kind: "none" },
+      identity,
+    );
+  }
+});
+
+test("a previous conversation already ready in a tab is reused instead of opened again", () => {
+  const ready = session({ id: "ready", provider: "chatgpt", conversationIdentity: previous, status: "ready" });
+  assert.deepEqual(
+    reopenConversationPlan({
+      provider: "chatgpt",
+      fresh: false,
+      preferredConversationIdentity: previous,
+      sessions: [session({ provider: "chatgpt", conversationIdentity: previous, status: "streaming" }), ready],
+    }),
+    { kind: "reuse", session: ready },
+  );
+});
+
+test("a previous conversation open but not ready is refused rather than opened twice", () => {
+  const plan = reopenConversationPlan({
+    provider: "chatgpt",
+    fresh: false,
+    preferredConversationIdentity: previous,
+    sessions: [
+      session({ provider: "claude", conversationIdentity: previous, status: "ready" }),
+      session({ provider: "chatgpt", conversationIdentity: previous, status: "streaming" }),
+    ],
+  });
+  assert.equal(plan.kind, "refuse");
+  assert.equal(plan.refusal.code, "PROVIDER_NOT_READY");
+  assert.match(plan.refusal.message, /previous provider conversation is open but streaming/u);
+});
+
+test("a previous conversation with no open tab is navigated to by its own URL", () => {
+  assert.deepEqual(
+    reopenConversationPlan({ provider: "claude", fresh: false, preferredConversationIdentity: "claude:https://claude.ai/chat/abc", sessions: [] }),
+    { kind: "navigate", url: "https://claude.ai/chat/abc", conversationIdentity: "claude:https://claude.ai/chat/abc" },
+  );
+});
+
+test("a reopened tab must come back ready on the conversation it was sent to", () => {
+  assert.equal(
+    reopenedSessionRefusal({ session: session({ conversationIdentity: previous }), conversationIdentity: previous }),
+    undefined,
+  );
+  assert.equal(
+    reopenedSessionRefusal({ session: session({ conversationIdentity: previous, status: "notAuthenticated" }), conversationIdentity: previous })?.code,
+    "AUTHENTICATION_REQUIRED",
+  );
+  const moved = reopenedSessionRefusal({ session: session({ conversationIdentity: "chatgpt:https://chatgpt.com/" }), conversationIdentity: previous });
+  assert.equal(moved?.code, "OPEN_CONVERSATION_FAILED");
+  assert.match(moved?.message ?? "", /previous provider conversation could not be reopened/u);
 });

@@ -183,6 +183,18 @@ test("server protocol rejects an invalid local model config", () => {
     model: "stub-model",
     timeoutMs: 5_000,
   }));
+  assert.doesNotThrow(() => parseServerMessage({
+    type: "localModel.config",
+    protocolVersion,
+    enabled: false,
+    backend: "auto",
+    model: "",
+    timeoutMs: 30_000,
+  }));
+  assert.throws(
+    () => parseServerMessage({ ...valid, model: 1 }),
+    /Invalid localModel\.config message/u,
+  );
   assert.throws(
     () => parseServerMessage({ ...valid, backend: "remote" }),
     /Invalid localModel\.config message/u,

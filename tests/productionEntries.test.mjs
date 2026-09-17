@@ -6451,6 +6451,58 @@ test("a Disconnect during tab creation closes the tab it opened", async () => {
   );
 });
 
+// A non-fresh open that names the conversation a participant was bound to returns to it: a ready
+// tab already on it is handed back without opening anything.
+test("an open naming a conversation already ready in a tab reuses that tab", async () => {
+  const harness = await registeredDocumentHarness("reopen-reuse");
+  try {
+    const socket = await harness.pair();
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "provider.discover",
+        protocolVersion: 9,
+      }),
+    });
+    for (let turn = 0; turn < 12; turn += 1) await nextTurn();
+    const created = harness.tabCalls.length;
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "provider.openConversation",
+        protocolVersion: 9,
+        requestId: "reopen-reuse",
+        provider: "chatgpt",
+        preferredConversationIdentity: "chatgpt:https://chatgpt.com/c/registered",
+      }),
+    });
+    for (let turn = 0; turn < 20; turn += 1) await nextTurn();
+    const result = socket.sent.find((frame) => frame.requestId === "reopen-reuse");
+    assert.equal(result?.success, true, JSON.stringify(result));
+    assert.equal(result.session.tabId, 31);
+    assert.equal(result.session.conversationIdentity, "chatgpt:https://chatgpt.com/c/registered");
+    assert.deepEqual(
+      harness.tabCalls.slice(created).filter((entry) => entry.call === "create" || entry.call === "update"),
+      [],
+      "reusing an open conversation still opened or navigated a tab",
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+// With no tab on that conversation, the tab it opens goes to the conversation itself rather than
+// to the provider's new-chat page.
+test("an open naming a conversation with no tab opens that conversation's URL", async () => {
+  const { calls } = await provisioningAcrossDisconnect("reopen-navigate", {
+    tabs: [],
+    request: { fresh: false, preferredConversationIdentity: "chatgpt:https://chatgpt.com/c/elsewhere" },
+    hold: (harness) => harness.holdTabCreate(),
+    reached: Object.assign((entry) => entry.call === "create", {
+      expected: { call: "create", options: { url: "https://chatgpt.com/c/elsewhere", active: false } },
+    }),
+  });
+  assert.deepEqual(calls.filter((entry) => entry.call === "update"), []);
+});
+
 // The local-model proxy is the extension's only outbound network path, and the entry owns it: a
 // content script may not reach the model itself. What it may ask for is decided by the controller
 // through `localModel.config`, so a prompt that arrives before the controller enabled healing is
