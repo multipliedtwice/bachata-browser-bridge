@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.9
+
+- A controller settings message that names no local selector-healing model is accepted instead of
+  closing the connection, so a bridge paired while selector healing is off stays connected.
+- A non-fresh open that names a previous conversation returns to it: a ready tab on that
+  conversation is reused, a tab on it that is not ready is refused rather than joined by a second
+  tab, and otherwise the conversation's own URL is opened and must report the same identity.
+
 ## 0.6.8
 
 - Popup explains completion, Stop, assets and conversation certainty from session capabilities.

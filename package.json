@@ -1,6 +1,6 @@
 {
   "name": "bachata-browser-bridge",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "private": true,
   "description": "Connect ChatGPT, Claude, and other browser AI chats to the steps in your Bachata workflows in VS Code.",
   "scripts": {
