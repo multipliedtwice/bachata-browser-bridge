@@ -51,7 +51,8 @@ The extension:
 - sends prompts and supported images to built-in providers;
 - sends text-only prompts to generic providers;
 - streams or captures rendered responses and visible built-in-provider assets;
-- interrupts turns and provisions built-in provider tabs.
+- interrupts turns and provisions built-in provider tabs;
+- optionally repairs a stale page selector by asking a local Ollama or LM Studio model on loopback to pick one of the page's own controls. This is off by default, and the VS Code extension chooses and checks the model. See [Auto-heal contract](docs/GENERIC_BROWSER_PROVIDER.md#auto-heal-contract).
 
 It has no filesystem or shell access. Local context, file changes, verification, and policy enforcement are owned by the VS Code extension.
 

@@ -53,9 +53,10 @@ const popupEntry = read("src/popup/index.ts");
 const build = read("scripts/build-generic.mjs");
 
 check("version", packageJson.version === "0.6.9", `version=${packageJson.version}`);
-for (const dependency of ["@medv/finder", "@mozilla/readability", "ajv", "dom-accessibility-api", "jsonrepair", "turndown", "turndown-plugin-gfm"]) {
+for (const dependency of ["@medv/finder", "@mozilla/readability", "dom-accessibility-api", "jsonrepair", "turndown", "turndown-plugin-gfm"]) {
   check(`dependency:${dependency}`, Boolean(packageJson.dependencies?.[dependency]), "runtime dependency is declared");
 }
+check("dependency:noAjv", !packageJson.dependencies?.ajv && !packageJson.devDependencies?.ajv, "healing schemas are interpreted by schemaGuard, so no schema compiler ships");
 for (const dependency of ["@testing-library/dom", "esbuild"]) {
   check(`devDependency:${dependency}`, Boolean(packageJson.devDependencies?.[dependency]), "development dependency is declared");
 }

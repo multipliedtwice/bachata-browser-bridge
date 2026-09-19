@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Removed the unused `ajv` runtime dependency. Healing answers were already validated by the
+  interpreted schema check in `src/content/generic/schemaGuard.ts`; the verifier now requires `ajv`
+  to be absent, and the Auto-heal contract documentation says so.
+
 ## 0.6.9
 
 - A controller settings message that names no local selector-healing model is accepted instead of
