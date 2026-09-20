@@ -120,11 +120,21 @@ test("provider code is injected only after explicit tab handling", async () => {
     new URL("../src/background/index.ts", import.meta.url),
     "utf8",
   );
+  const genericSource = await readFile(
+    new URL("../src/background/genericProvider.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /chrome\.scripting\.executeScript/);
+  assert.match(source, /files: \["content\/ownedFavicon\.js"\]/u);
+  assert.doesNotMatch(source, /"content\/ownedFavicon\.js",\s*"content\/assetLogic\.js"/u);
   assert.match(source, /content\/chatgptLogic\.js/);
   assert.match(source, /content\/chatgpt\.js/);
   assert.match(source, /content\/claudeLogic\.js/);
   assert.match(source, /content\/claude\.js/);
+  assert.match(
+    genericSource,
+    /files: \["generic-content\.js"\]/u,
+  );
 });
 
 test("protocol contract matches the browser implementation", async () => {
@@ -171,13 +181,14 @@ test("background revisions provider status and holds accepted navigation transit
   assert.match(source, /providerStatusRevision/);
   assert.match(source, /providerStatusQueue/);
   assert.match(source, /hasActiveInitialTransition/);
-  // BB-AUD-09. What a tab change means is decided in `tabChange.ts`, which is where the
-  // pending-transition suppression now lives.
+  // BB-AUD-09. What a tab change means is decided in `tabChange.ts`. Same-provider events are
+  // notifications while a request is active; live content messages remain the identity gate.
   const tabChange = await readFile(
     new URL("../src/background/tabChange.ts", import.meta.url),
     "utf8",
   );
-  assert.match(tabChange, /suppressRefresh: permittedPendingTransition/);
+  assert.match(tabChange, /activeRequest\?\.provider === provider/);
+  assert.match(tabChange, /return \{ verdict: "kept", suppressRefresh: true \}/);
   assert.match(source, /urlVerdict\.suppressRefresh/);
 });
 
@@ -383,12 +394,18 @@ test("asset transfer lifecycle requires one start and an exact declared size", a
   );
 });
 
-test("startup reinjects only explicitly handled provider tabs", async () => {
+test("startup restores only the selected provider tab", async () => {
   const source = await readFile(
     new URL("../src/background/index.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /handledTabIds/);
+  assert.match(source, /const handled = new Set<number>\(\)/u);
+  assert.match(source, /handled\.add\(stored\.selectedTabId\)/u);
+  assert.match(
+    source,
+    /const selectedSession = \(await buildSessions\(\)\)\.find\([\s\S]{0,180}await selectOwnedSession\(selectedSession\)/u,
+    "startup must replace a selected tab's stale document-scoped session id",
+  );
   assert.match(source, /tabs\.filter\(\(tab\) => handled\.has\(tab\.id\)\)/);
   assert.doesNotMatch(
     source,
@@ -446,6 +463,7 @@ test("coverage gates every core module and production entry independently", asyn
   for (const file of [
     "dist/background/conversation.js",
     "dist/content/assetLogic.js",
+    "dist/content/ownedFavicon.js",
     "dist/content/providerControls.js",
     "dist/protocol/types.js",
     "dist/background/index.js",

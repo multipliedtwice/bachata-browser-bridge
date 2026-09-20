@@ -294,9 +294,27 @@ export const captureGenericResponse = async (
     Math.min(20_000, Math.max(1_000, Math.floor(initialRemaining / 4))),
   );
   let chosen: Element | undefined;
-  let lastText = "";
+  let snapshot: Element | undefined;
   let stableSince = Date.now();
   let reanchorMissingSince: number | undefined;
+  const observeGeneration = (): boolean => {
+    const generating = generationActive?.() ?? false;
+    if (generating) {
+      state.sawGeneration = true;
+      state.generationEndedAt = undefined;
+    } else if (state.sawGeneration && state.generationEndedAt === undefined) {
+      state.generationEndedAt = Date.now();
+    }
+    return generating;
+  };
+  const completionConfirmed = (generating: boolean): boolean => genericResponseCompletionConfirmed({
+    generationObserverAvailable: Boolean(generationActive),
+    sawGeneration: state.sawGeneration,
+    generating,
+    generationEndedAt: state.generationEndedAt,
+    stableSince,
+    now: Date.now(),
+  });
   while (Date.now() < state.deadlineAt) {
     assertCurrentConversation?.();
     if (signal.aborted) {
@@ -304,6 +322,8 @@ export const captureGenericResponse = async (
     }
     const currentRoot = resolveRoot();
     if (!currentRoot?.isConnected) {
+      chosen = undefined;
+      snapshot = undefined;
       reanchorMissingSince ??= Date.now();
       if (Date.now() - reanchorMissingSince >= reanchorGraceMs) {
         throw new Error("The submitted request nonce is no longer present in the active generic conversation");
@@ -318,6 +338,8 @@ export const captureGenericResponse = async (
     ) {
       const rebound = smallestPromptElement(currentRoot, requestNonce);
       if (!rebound) {
+        chosen = undefined;
+        snapshot = undefined;
         reanchorMissingSince ??= Date.now();
         if (Date.now() - reanchorMissingSince >= reanchorGraceMs) {
           throw new Error("The submitted request nonce is no longer present in the active generic conversation");
@@ -329,19 +351,13 @@ export const captureGenericResponse = async (
       root = currentRoot;
       promptElement = rebound;
       chosen = undefined;
-      lastText = "";
+      snapshot = undefined;
       stableSince = Date.now();
     } else {
       reanchorMissingSince = undefined;
       root = currentRoot;
     }
-    const generating = generationActive?.() ?? false;
-    if (generating) {
-      state.sawGeneration = true;
-      state.generationEndedAt = undefined;
-    } else if (state.sawGeneration && state.generationEndedAt === undefined) {
-      state.generationEndedAt = Date.now();
-    }
+    const generating = observeGeneration();
     if (laterExplicitUserTurn(root, promptElement)) {
       throw new Error("Another user turn appeared before the generic browser response was captured");
     }
@@ -356,65 +372,84 @@ export const captureGenericResponse = async (
       })) {
         throw new Error("Generic browser response appeared without an observable generation lifecycle; bind or repair the Stop control");
       }
+      if (chosen !== next || !snapshot?.isEqualNode(next)) {
+        snapshot = next.cloneNode(true) as Element;
+        stableSince = Date.now();
+      }
+      chosen = next;
       const streamText = (next.textContent ?? "").replace(/\r\n/g, "\n").trim();
       if (streamText && streamText !== state.lastStreamText) {
         state.lastStreamText = streamText;
         await onStream?.(streamText);
+        continue;
       }
-      if (chosen !== next || text !== lastText) {
-        chosen = next;
-        lastText = text;
-        stableSince = Date.now();
-      } else {
-        const completionConfirmed = genericResponseCompletionConfirmed({
-          generationObserverAvailable: Boolean(generationActive),
-          sawGeneration: state.sawGeneration,
-          generating,
-          generationEndedAt: state.generationEndedAt,
-          stableSince,
-          now: Date.now(),
-        });
-        if (completionConfirmed) {
-          const captured = elementToCapturedResponse(chosen);
-          if (captured.text && captured.text !== state.lastStreamText) {
-            state.lastStreamText = captured.text;
-            await onStream?.(captured.text);
-          }
-          // BR-G6-06. Everything above this point crossed an await. A response is this
-          // request's only if the conversation is still this request's, the anchor still
-          // carries this request's nonce, and the response node is still inside the
-          // conversation that anchor is in.
-          assertCurrentConversation?.();
-          const finalRoot = resolveRoot();
-          if (
-            finalRoot !== root ||
-            !anchorHoldsNonce(promptElement, requestNonce) ||
-            !chosen.isConnected ||
-            !finalRoot.contains(chosen)
-          ) {
-            throw new Error("The submitted request nonce is no longer present in the active generic conversation");
-          }
-          // BB-A4-N03. Still the same synchronous run: the page the answer was taken from is
-          // recorded here, beside the checks that just proved the answer is this request's.
-          // Nothing after this may read the page for that identity again.
-          const ownership = attestOwnership?.();
-          return {
-            markdown: elementToMarkdown(chosen),
-            text: captured.text,
-            segments: captured.segments,
-            attestation: {
-              requestId: ownership?.requestId ?? "",
-              nonce: requestNonce,
-              documentRevision: ownership?.documentRevision ?? 0,
-              conversationUrl: ownership?.conversationUrl ?? "",
-              conversationIdentity: ownership?.conversationIdentity ?? "",
-              responseElement: chosen,
-              promptElement,
-              conversationRoot: finalRoot,
-            },
-          };
+      if (completionConfirmed(generating)) {
+        const captured = elementToCapturedResponse(snapshot);
+        const markdown = elementToMarkdown(snapshot);
+        const generationEndedAt = state.generationEndedAt;
+        if (captured.text && captured.text !== state.lastStreamText) {
+          state.lastStreamText = captured.text;
+          await onStream?.(captured.text);
         }
+        if (signal.aborted) {
+          throw new DOMException("Response capture interrupted", "AbortError");
+        }
+        if (Date.now() >= state.deadlineAt) break;
+        // BR-G6-06. Everything above this point crossed an await. A response is this
+        // request's only if the conversation is still this request's, the anchor still
+        // carries this request's nonce, and the response node is still inside the
+        // conversation that anchor is in.
+        assertCurrentConversation?.();
+        const finalRoot = resolveRoot();
+        if (
+          finalRoot !== root ||
+          !finalRoot.isConnected ||
+          !finalRoot.contains(promptElement) ||
+          !anchorHoldsNonce(promptElement, requestNonce) ||
+          !chosen.isConnected ||
+          !finalRoot.contains(chosen)
+        ) {
+          throw new Error("The submitted request nonce is no longer present in the active generic conversation");
+        }
+        if (laterExplicitUserTurn(finalRoot, promptElement)) {
+          throw new Error("Another user turn appeared before the generic browser response was captured");
+        }
+        const finalGenerating = observeGeneration();
+        const finalCandidate = latestResponseCandidate(laterCandidates(finalRoot, promptElement, responseRecipe));
+        if (
+          finalCandidate !== chosen ||
+          !snapshot.isEqualNode(finalCandidate) ||
+          state.generationEndedAt !== generationEndedAt ||
+          !completionConfirmed(finalGenerating)
+        ) {
+          chosen = undefined;
+          snapshot = undefined;
+          stableSince = Date.now();
+          continue;
+        }
+        // BB-A4-N03. Still the same synchronous run: the page the answer was taken from is
+        // recorded here, beside the checks that just proved the answer is this request's.
+        // Nothing after this may read the page for that identity again.
+        const ownership = attestOwnership?.();
+        return {
+          markdown,
+          text: captured.text,
+          segments: captured.segments,
+          attestation: {
+            requestId: ownership?.requestId ?? "",
+            nonce: requestNonce,
+            documentRevision: ownership?.documentRevision ?? 0,
+            conversationUrl: ownership?.conversationUrl ?? "",
+            conversationIdentity: ownership?.conversationIdentity ?? "",
+            responseElement: chosen,
+            promptElement,
+            conversationRoot: finalRoot,
+          },
+        };
       }
+    } else {
+      chosen = undefined;
+      snapshot = undefined;
     }
     await delay(Math.min(250, Math.max(1, state.deadlineAt - Date.now())));
   }

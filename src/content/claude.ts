@@ -812,6 +812,7 @@ const captureResponse = async (
     throw new Error("Timed out waiting for Claude response completion");
   } catch (cause) {
     if (!cancelledRequests.has(request.requestId)) {
+      await interruptAndConfirm(request.requestId, true).catch(() => false);
       quarantineConversation("claude", request.conversationIdentity);
       await sendBackground({
         type: "content.error",

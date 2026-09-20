@@ -38,6 +38,8 @@ The one-use pairing token stays in popup memory until pairing succeeds. It is no
 
 The token field is masked until the user presses Show. Clipboard reads happen only on an explicit Paste press and never automatically; a blocked read surfaces an inline message instead of failing silently.
 
+Pairing codes use `v9.<port>.<token>`. Only port varies. Popup fixes scheme, host, and path to Protocol v9 loopback. Raw tokens remain supported with the visible endpoint.
+
 ## Provisioning
 
 Stable request IDs, deduplication, concurrency limit, queued and active cancellation, disconnect cleanup, bounded result replay, and retained failed tabs.

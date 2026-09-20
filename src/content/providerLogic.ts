@@ -521,6 +521,7 @@ type ComposerGuard<TElement extends Element> = {
 type BackgroundAck = {
   success: boolean;
   error?: string;
+  accepted?: boolean;
 };
 
 /**
@@ -555,6 +556,7 @@ type BachataSubmittedPromptHooks = {
   /** Every user message the page currently shows, in document order. */
   userMessages: () => HTMLElement[];
   messageId: (element: HTMLElement) => string | undefined;
+  promptMatches?: ((element: HTMLElement, expected: string) => boolean) | undefined;
   healDom: () => Promise<unknown>;
   delay: (milliseconds: number) => Promise<void>;
   now?: (() => number) | undefined;
@@ -744,7 +746,7 @@ type BachataConversationBinderHooks = {
   documentToken: string;
   provider: string;
   currentUrl: () => string;
-  sendBackground: (message: unknown) => Promise<unknown>;
+  sendBackground: <T extends BackgroundAck>(message: unknown) => Promise<T>;
   registerDocument: () => Promise<void>;
 };
 
@@ -2232,7 +2234,7 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
       ) {
         throw new Error(`The ${config.label} conversation changed during the active request`);
       }
-      await hooks.sendBackground({
+      const acknowledgement = await hooks.sendBackground<BackgroundAck>({
         type: "content.transition",
         submissionCommitted: true,
         requestId: request.requestId,
@@ -2243,6 +2245,7 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
         conversationUrl: nextUrl,
         conversationIdentity: nextIdentity,
       });
+      if (acknowledgement.accepted === false) return;
       request.conversationUrl = nextUrl;
       request.conversationIdentity = nextIdentity;
       request.transitionUsed = true;
@@ -2386,6 +2389,9 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
       previousUsers: ReadonlySet<HTMLElement>,
     ): Promise<BachataSubmittedUserBinding> => {
       const text = canonicalizeRenderedPrompt(request.text);
+      const promptMatches = hooks.promptMatches
+        ?? ((element: HTMLElement, expected: string) =>
+          canonicalizeRenderedPrompt(element.innerText) === expected);
       const startedAt = now();
       const deadlineAt = Math.min(request.deadlineAt, startedAt + timeoutMs);
       let healingAttempted = false;
@@ -2394,11 +2400,16 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
           throw new Error(`${config.label} request was interrupted`);
         }
         await hooks.ensureConversationBinding(request);
-        const matches = hooks.userMessages().filter(
-          (element) =>
-            !previousUsers.has(element) &&
-            canonicalizeRenderedPrompt(element.innerText) === text,
-        );
+        const matches = hooks.userMessages().filter((element) => {
+          if (previousUsers.has(element)) return false;
+          try {
+            return promptMatches(element, text);
+          } catch {
+            // A provider can replace or detach a message while it is being read. That transient
+            // DOM state is not proof that submission failed; the next poll gets a fresh element.
+            return false;
+          }
+        });
         if (matches.length > 1) {
           throw new Error(`More than one matching ${config.label} user message appeared`);
         }

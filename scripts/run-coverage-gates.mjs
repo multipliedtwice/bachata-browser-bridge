@@ -58,6 +58,7 @@ const groups = {
     ["dist/background/routerState.js", 100, 100, 100, ["tests/routerState.test.mjs"]],
     ["dist/background/serializedState.js", 100, 100, 81, ["tests/stateConcurrency.test.mjs"]],
     ["dist/content/assetLogic.js", 95, 75, 97, ["tests/assetLogic.test.mjs"]],
+    ["dist/content/ownedFavicon.js", 97, 85, 100, ["tests/ownedFavicon.test.mjs"]],
     // BB-AUD-10. The healer's persisted selection is a cache whose write, read and removal
     // are all best effort. Gated at the run total node measures, which is lower than the
     // 83/40/80 the file itself reaches because the suite's DOM support is counted with it.

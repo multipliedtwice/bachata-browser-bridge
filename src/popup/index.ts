@@ -84,12 +84,28 @@ let state: State = {
   connecting: false,
   tabs: [],
 };
-// The port is a setting with a default, so the endpoint is canonical unless the reader changed
-// it. Prefilling it is what lets pairing be one paste: the reader carries only the secret, and a
-// clipboard a hostile process can write cannot redirect the Bridge to a port of its choosing.
+// The canonical endpoint remains the fallback for legacy tokens. New pairing codes carry only a
+// validated loopback port, so a dynamically allocated Bridge can be reached without copying a URL.
 const canonicalEndpoint = "ws://127.0.0.1:43127/bachata-browser-bridge-v9";
 // `randomBytes(32).toString("base64url")` on the VS Code side: 43 unpadded base64url characters.
 const pairingTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
+const pairingCodePattern = /^v9\.([1-9][0-9]{0,4})\.([A-Za-z0-9_-]{43})$/u;
+
+type RoutedPairing = {
+  endpoint: string;
+  token: string;
+};
+
+const routedPairing = (value: string): RoutedPairing | undefined => {
+  const match = pairingCodePattern.exec(value.trim());
+  if (!match) return undefined;
+  const port = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) return undefined;
+  return {
+    endpoint: `ws://127.0.0.1:${String(port)}/bachata-browser-bridge-v9`,
+    token: match[2] ?? "",
+  };
+};
 let endpointDraft = "";
 let endpointInitialized = false;
 let endpointDirty = false;
@@ -423,7 +439,7 @@ const buildDom = () => {
   advanced.open = false;
   advanced.append(create("summary", { text: "Connection settings" }), endpointLabel, endpointInput, endpointError, endpointHint);
 
-  const tokenLabel = create("label", { text: "Pairing token" });
+  const tokenLabel = create("label", { text: "Pairing code" });
   tokenLabel.setAttribute("for", "token");
   const tokenInput = create("input", { id: "token" });
   tokenInput.type = "password";
@@ -444,7 +460,7 @@ const buildDom = () => {
   tokenField.append(tokenHeading, tokenInput);
   const tokenErrorText = create("p", { id: "token-error", className: "field-error" });
   tokenErrorText.setAttribute("role", "alert");
-  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Copy the pairing token from Bachata’s Browser Bridge settings in VS Code." });
+  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Copy the pairing code from Bachata’s Browser Bridge settings in VS Code. It selects the local port automatically." });
 
   tokenInput.setAttribute("aria-describedby", "token-hint token-error");
   tokenReveal.setAttribute("aria-controls", "token");
@@ -911,8 +927,9 @@ const apply = async (message: unknown): Promise<void> => {
   render();
   try {
     const response = await call(message);
-    const success = isState(response) && response.revision >= state.revision;
-    if (success && type === "popup.pair") {
+    const acceptedState = isState(response) && response.revision >= state.revision;
+    const pairingConnected = acceptedState && response.connected;
+    if (pairingConnected && type === "popup.pair") {
       endpointDirty = false;
       endpointInitialized = false;
       tokenDraft = "";
@@ -923,7 +940,7 @@ const apply = async (message: unknown): Promise<void> => {
       connectionOpen = false;
       dom.tokenInput.value = "";
     }
-    if (success && type === "popup.select") {
+    if (acceptedState && type === "popup.select") {
       choosingConversation = false;
     }
     mergeState(response);
@@ -966,11 +983,18 @@ dom.tokenPaste.addEventListener("click", () => {
         return;
       }
       if (pasted === "") {
-        tokenError = "The clipboard is empty. Copy the token in VS Code.";
+        tokenError = "The clipboard is empty. Copy the pairing code in VS Code.";
       } else {
+        const routed = routedPairing(pasted);
         tokenDraft = pasted;
+        if (routed) {
+          endpointDraft = routed.endpoint;
+          endpointDirty = true;
+          dom.endpointInput.value = routed.endpoint;
+        }
         tokenEditRevision += 1;
-        dom.tokenInput.value = pasted;
+        invalidatePairingIntent();
+        dom.tokenInput.value = tokenDraft;
         tokenError = "";
       }
     } catch {
@@ -987,11 +1011,9 @@ dom.tokenPaste.addEventListener("click", () => {
 /**
  * Paste & Pair.
  *
- * One control for the whole first run: read the token the reader copied in VS Code, check it has
- * the shape a pairing token has, and hand it straight to the pairing the Pair button already runs.
- * The endpoint is never taken from the clipboard — it is the canonical one, or whatever the reader
- * typed into the field — so a clipboard written by a hostile process cannot point the Bridge at a
- * port it controls. It can, at worst, spend a token that is already short-lived and single-use.
+ * One control for the whole first run: read the pairing value copied in VS Code and hand it to the
+ * pairing the Pair button already runs. A v9 pairing code may select a numeric port, but the scheme,
+ * host and path remain fixed here; legacy raw tokens continue to use the endpoint field.
  */
 dom.tokenPastePair.addEventListener("click", () => {
   if (pending || pasting) {
@@ -1031,22 +1053,29 @@ dom.tokenPastePair.addEventListener("click", () => {
       render();
       return;
     }
-    if (!pairingTokenPattern.test(token)) {
+    const routed = routedPairing(token);
+    if (!routed && !pairingTokenPattern.test(token)) {
       tokenError = token === ""
-        ? "The clipboard is empty. Copy the token in VS Code."
-        : "That is not a pairing token. Copy the token in VS Code.";
+        ? "The clipboard is empty. Copy the pairing code in VS Code."
+        : "That is not a pairing token or code. Copy it again in VS Code.";
       pasting = false;
       render();
       dom.tokenInput.focus();
       return;
     }
+    const pairingEndpoint = routed?.endpoint ?? endpoint;
     tokenDraft = token;
+    if (routed) {
+      endpointDraft = routed.endpoint;
+      endpointDirty = true;
+      dom.endpointInput.value = routed.endpoint;
+    }
     tokenEditRevision += 1;
-    dom.tokenInput.value = token;
+    dom.tokenInput.value = tokenDraft;
     tokenError = "";
     pasting = false;
     render();
-    await apply({ type: "popup.pair", endpoint, token });
+    await apply({ type: "popup.pair", endpoint: pairingEndpoint, token: routed?.token ?? tokenDraft });
   })();
 });
 dom.tokenReveal.addEventListener("click", () => {
@@ -1056,11 +1085,24 @@ dom.tokenReveal.addEventListener("click", () => {
 });
 dom.form.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (pending || !endpointDraft.trim() || !tokenDraft.trim() || endpointProblem(endpointDraft) !== "") {
+  const routed = routedPairing(tokenDraft);
+  if (tokenDraft.trim().startsWith("v9.") && !routed) {
+    tokenError = "That pairing code is invalid. Copy it again in VS Code.";
+    render();
     return;
   }
+  const endpoint = routed?.endpoint ?? endpointDraft;
+  const token = routed?.token ?? tokenDraft.trim();
+  if (pending || !endpoint.trim() || !token || endpointProblem(endpoint) !== "") {
+    return;
+  }
+  if (routed) {
+    endpointDraft = routed.endpoint;
+    endpointDirty = true;
+    dom.endpointInput.value = routed.endpoint;
+  }
   invalidatePairingIntent();
-  void apply({ type: "popup.pair", endpoint: endpointDraft, token: tokenDraft });
+  void apply({ type: "popup.pair", endpoint, token });
 });
 dom.editConnection.addEventListener("click", () => {
   editingConnection = true;

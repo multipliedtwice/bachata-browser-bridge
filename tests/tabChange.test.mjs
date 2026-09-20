@@ -112,11 +112,6 @@ test("ordinary URL-less completions are not hidden as first transitions", () => 
       }),
     },
     { activeRequest: activeRequest({ provider: "claude" }) },
-    { activeRequest: activeRequest({ tabId: 4 }) },
-    { activeRequest: activeRequest({ frameId: 1 }) },
-    { activeRequest: activeRequest({ documentId: "other-document-id" }) },
-    { activeRequest: activeRequest({ documentToken: "other-document" }) },
-    { activeRequest: activeRequest({ conversationIdentity: "chatgpt:https://chatgpt.com/c/other" }) },
   ];
   for (const candidate of cases) {
     assert.deepEqual(
@@ -144,22 +139,40 @@ test("an established conversation's URL-less completion still probes and refresh
   );
 });
 
-test("a transition is only protected while the binding it belongs to is still held", () => {
-  // The pending-transition rule now compares a request against the binding it was taken from,
-  // field for field, rather than accepting any active request on the tab. With no binding there is
-  // nothing to compare and nothing to protect: the update is not treated as a navigation away, and
-  // it is not treated as a transition either, so the refresh and the support probe still happen.
+test("a possible first transition is deferred to strict transition admission", () => {
+  // The tab event proves the current URL, but it does not carry the content sender that proves
+  // document and token ownership. It therefore preserves the pending request; content.transition
+  // performs the strict identity check before any request or binding is moved.
   assert.deepEqual(
     providerTabUrlVerdict({
       url: "https://chatgpt.com/c/new-one",
       activeRequest: activeRequest(),
     }),
-    { verdict: "kept", suppressRefresh: false },
+    { verdict: "kept", suppressRefresh: true },
   );
   assert.deepEqual(
     providerTabUrlVerdict({ status: "complete", activeRequest: activeRequest() }),
-    { verdict: "no-url-change" },
+    { verdict: "kept", suppressRefresh: true },
   );
+});
+
+test("binding identity disagreements are decided by transition admission, not the tab event", () => {
+  for (const change of [
+    { tabId: 4 },
+    { frameId: 1 },
+    { documentToken: "other-document" },
+    { conversationIdentity: "chatgpt:https://chatgpt.com/c/other" },
+  ]) {
+    assert.deepEqual(
+      providerTabUrlVerdict({
+        url: "https://chatgpt.com/c/new-one",
+        binding: initialBinding(),
+        activeRequest: activeRequest(change),
+      }),
+      { verdict: "kept", suppressRefresh: true },
+      JSON.stringify(change),
+    );
+  }
 });
 
 test("a completion is only suppressed once the load has actually finished", () => {
@@ -243,7 +256,7 @@ test("a document replaced at the same URL loses its binding", () => {
     providerTabUrlVerdict({ url: "https://chatgpt.com/c/one", binding: binding() }),
     { verdict: "kept", suppressRefresh: false },
   );
-  // A first route transition may stay in one document; it may not replace the document the
+  // An active route transition may stay in one document; it may not replace the document the
   // controller bound, even when the destination path would otherwise be allowed.
   assert.deepEqual(
     providerTabUrlVerdict({
@@ -257,8 +270,8 @@ test("a document replaced at the same URL loses its binding", () => {
       documentId: "doc-2",
     }),
     {
-      verdict: "left-its-conversation",
-      failure: "The selected browser tab navigated",
+      verdict: "document-replaced",
+      failure: "The selected browser document was replaced",
       suppressRefresh: false,
     },
   );
@@ -282,11 +295,29 @@ test("a permitted initial transition is not a navigation away, and publishes no 
   );
 });
 
-test("a request that cannot transition does not protect the tab from losing its binding", () => {
+test("a late initial-route event cannot roll back an accepted transition", () => {
+  const transitioned = activeRequest({
+    conversationUrl: "https://chatgpt.com/c/new-one",
+    conversationIdentity: "chatgpt:https://chatgpt.com/c/new-one",
+    transitionUsed: true,
+  });
+  assert.deepEqual(
+    providerTabUrlVerdict({
+      url: "https://chatgpt.com/",
+      binding: binding({
+        conversationUrl: transitioned.conversationUrl,
+        conversationIdentity: transitioned.conversationIdentity,
+      }),
+      activeRequest: transitioned,
+    }),
+    { verdict: "kept", suppressRefresh: true },
+  );
+});
+
+test("same-provider tab events defer to live content binding while a request is active", () => {
   for (const change of [
     { allowInitialConversationTransition: false },
     { transitionUsed: true },
-    { provider: "claude" },
     { conversationUrl: "https://chatgpt.com/c/already-one" },
   ]) {
     const verdict = providerTabUrlVerdict({
@@ -294,8 +325,16 @@ test("a request that cannot transition does not protect the tab from losing its 
       binding: initialBinding(),
       activeRequest: activeRequest(change),
     });
-    assert.equal(verdict.verdict, "left-its-conversation", JSON.stringify(change));
+    assert.deepEqual(verdict, { verdict: "kept", suppressRefresh: true }, JSON.stringify(change));
   }
+  assert.equal(
+    providerTabUrlVerdict({
+      url: "https://chatgpt.com/c/new-one",
+      binding: initialBinding(),
+      activeRequest: activeRequest({ provider: "claude" }),
+    }).verdict,
+    "left-its-conversation",
+  );
 });
 
 test("a finished load is probed only for a tracked tab that is not mid-transition", () => {

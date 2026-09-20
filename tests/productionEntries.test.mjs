@@ -3932,6 +3932,7 @@ const runChatGptCaptureEntry = async ({
   let aborted = false;
   let settled = false;
   let clicks = 0;
+  let stopClicks = 0;
   let stopCapture;
   try {
     const stamp = `capture-${Date.now()}-${Math.random()}`;
@@ -3981,7 +3982,12 @@ const runChatGptCaptureEntry = async ({
         }></div>`
         + `</article>`,
       ));
-      dom.query("form").appendChild(dom.html(`<button data-testid="stop-button"></button>`));
+      const stop = dom.html(`<button data-testid="stop-button"></button>`);
+      stop.addEventListener("click", () => {
+        stopClicks += 1;
+        stop.remove();
+      });
+      dom.query("form").appendChild(stop);
       // The exact nodes the completion-evidence path would serialize if it were active.
       dom.countInnerHtml(dom.query("[data-message-author-role='assistant']"));
       dom.countInnerHtml(dom.query("article[data-testid='conversation-turn-2']"));
@@ -4026,6 +4032,7 @@ const runChatGptCaptureEntry = async ({
       innerHtmlReads: dom.innerHtmlReads(),
       innerTextReads: dom.innerTextReads(),
       clicks,
+      stopClicks,
       observedTurns: dom.observedTargets.filter(
         (target) => target?.getAttribute?.("data-testid")?.startsWith("conversation-turn-") === true,
       ).length,
@@ -4122,6 +4129,47 @@ test("production ChatGPT capture fails a turn closed and quarantines the convers
   assert.equal(terminal?.type, "content.error", JSON.stringify(terminal));
   assert.equal(terminal.code, "PROVIDER_RESPONSE_FAILED", JSON.stringify(terminal));
   assert.equal(quarantined.length > 0, true);
+});
+
+test("production ChatGPT keeps its connected response when the provider duplicates its identifier", async () => {
+  const duplicateIdentifier = async ({ dom, answer }) => {
+    await sleep(20);
+    const response = dom.query("[data-message-author-role='assistant']");
+    response.textContent = answer;
+    response.parentElement?.appendChild(dom.html(
+      `<div data-message-author-role="assistant" data-message-id="assistant-1">hidden duplicate</div>`,
+    ));
+    await sleep(20);
+    dom.query("button[data-testid='stop-button']")?.remove();
+  };
+  const { terminal } = await runChatGptCaptureEntry({
+    answer: "connected response",
+    settle: duplicateIdentifier,
+  });
+  assert.equal(terminal?.type, "content.response", JSON.stringify(terminal));
+  assert.equal(terminal.response.text.includes("connected response"), true);
+});
+
+test("production ChatGPT stops generation when response capture fails", async () => {
+  const ambiguousReplacement = async ({ dom }) => {
+    await sleep(20);
+    const response = dom.query("[data-message-author-role='assistant']");
+    response.remove();
+    const turn = dom.query("article[data-testid='conversation-turn-2']");
+    turn.appendChild(dom.html(
+      `<div data-message-author-role="assistant" data-message-id="assistant-1">first</div>`,
+    ));
+    turn.appendChild(dom.html(
+      `<div data-message-author-role="assistant" data-message-id="assistant-1">second</div>`,
+    ));
+  };
+  const { terminal, stopClicks } = await runChatGptCaptureEntry({
+    answer: "unused",
+    settle: ambiguousReplacement,
+  });
+  assert.equal(terminal?.type, "content.error", JSON.stringify(terminal));
+  assert.match(terminal.message, /identifier became ambiguous/u);
+  assert.equal(stopClicks, 1, "capture failure left provider generation running");
 });
 
 const readerFault = () => new TypeError("Cannot read properties of null (reading 'textContent')");
@@ -4328,10 +4376,13 @@ const registeredDocumentHarness = async (label, options = {}) => {
   let nextTimerId = 1;
   const providerUrl = options.providerUrl ?? "https://chatgpt.com/c/registered";
   const documentToken = "registered-document-token";
-  let providerTabs = [{ id: 31, url: providerUrl, title: "registered" }];
+  let providerTabs = options.providerTabs ?? [{ id: 31, url: providerUrl, title: "registered" }];
+  let providerFrameUrl;
   // BB-A4-N04. Every reinjection this entry performs, by tab, so a document that was replaced can
   // be shown to be picked up again rather than left for manual rediscovery.
   const injections = [];
+  const scriptExecutions = [];
+  let contentInjectionGate;
   // BB-A4-F10. A provisioning step held open between the lookup and what it does with the answer,
   // so a Disconnect landing inside that window is a place a test can stand rather than a race.
   // `tabCalls` records every navigation the entry attempts.
@@ -4433,6 +4484,17 @@ const registeredDocumentHarness = async (label, options = {}) => {
       onReplaced: replacedEvent,
     },
     webNavigation: {
+      getFrame: async ({ tabId, frameId }) => {
+        const tab = providerTabs.find((candidate) => candidate.id === tabId);
+        if (!tab || frameId !== 0 || typeof tab.url !== "string") return undefined;
+        return {
+          tabId,
+          frameId,
+          documentId: contentSender.documentId,
+          documentLifecycle: "active",
+          url: providerFrameUrl ?? tab.url,
+        };
+      },
       onCommitted: committedEvent,
       onHistoryStateUpdated: historyEvent,
       onReferenceFragmentUpdated: fragmentEvent,
@@ -4440,6 +4502,10 @@ const registeredDocumentHarness = async (label, options = {}) => {
     scripting: {
       executeScript: async (details) => {
         injections.push(details?.target?.tabId);
+        scriptExecutions.push(details);
+        if (details?.files?.includes("content/chatgpt.js") && contentInjectionGate) {
+          await contentInjectionGate;
+        }
         await registerInjectedDocument(details?.target?.tabId);
       },
     },
@@ -4588,6 +4654,7 @@ const registeredDocumentHarness = async (label, options = {}) => {
     providerUrl,
     runtimeEvent,
     injections,
+    scriptExecutions,
     updatedEvent,
     committedEvent,
     historyEvent,
@@ -4597,12 +4664,18 @@ const registeredDocumentHarness = async (label, options = {}) => {
     sockets,
     restore: () => restoreGlobals(saved),
     setContentReply: (value) => { contentReply = value; },
+    setProviderFrameUrl: (value) => { providerFrameUrl = value; },
     setProviderTabs: (value) => { providerTabs = value; },
     tabCalls,
     holdTabGet: () => {
       let release = () => undefined;
       tabGetGate = new Promise((resolve) => { release = resolve; });
       return () => { tabGetGate = undefined; release(); };
+    },
+    holdContentInjection: () => {
+      let release = () => undefined;
+      contentInjectionGate = new Promise((resolve) => { release = resolve; });
+      return () => { contentInjectionGate = undefined; release(); };
     },
     holdTabCreate: () => {
       let release = () => undefined;
@@ -4622,6 +4695,46 @@ const registerDocument = async (harness) => await harness.fromContent({
   documentToken: harness.documentToken,
   conversationUrl: harness.providerUrl,
   conversationIdentity: `chatgpt:${harness.providerUrl}`,
+});
+
+test("concurrent discovery and selection inject one provider document", async () => {
+  const harness = await registeredDocumentHarness("single-flight-content-injection", {
+    providerTabs: [],
+  });
+  let releaseInjection = () => undefined;
+  try {
+    const socket = await harness.pair();
+    harness.setProviderTabs([{
+      id: 31,
+      url: harness.providerUrl,
+      title: "registered",
+    }]);
+    releaseInjection = harness.holdContentInjection();
+    const selection = dispatchRuntimeMessage(harness.runtimeEvent.listeners[0], {
+      type: "popup.select",
+      tabId: 31,
+    });
+    for (let turn = 0; turn < 8; turn += 1) await nextTurn();
+    socket.emit("message", {
+      data: JSON.stringify({ type: "provider.discover", protocolVersion: 9 }),
+    });
+    for (let turn = 0; turn < 8; turn += 1) await nextTurn();
+    assert.equal(
+      harness.scriptExecutions.filter((details) => details?.files?.includes("content/chatgpt.js")).length,
+      1,
+      "the competing setup path injected a second provider document",
+    );
+    releaseInjection();
+    const selected = await selection;
+    assert.equal(selected.selectedTabId, 31);
+    assert.equal(
+      harness.scriptExecutions.filter((details) => details?.files?.includes("content/chatgpt.js")).length,
+      1,
+    );
+  } finally {
+    releaseInjection();
+    harness.restore();
+  }
 });
 
 // BB-AUD-09. Everything that must already be true before one asset frame means anything: a
@@ -5163,6 +5276,43 @@ test("a URL-less completion cannot disturb ChatGPT's pending first-turn transiti
     // Until the content script claims the exact root -> conversation transition, this completion
     // has no URL to judge and must not probe, re-register, inject, or publish a transient status.
     harness.setProviderTabs([{ id: 31, url: "https://chatgpt.com/c/assigned", title: "assigned" }]);
+    const assignedUrl = "https://chatgpt.com/c/assigned";
+    const assignedIdentity = `chatgpt:${assignedUrl}`;
+    const assignedSender = {
+      ...harness.contentSender,
+      tab: { ...harness.contentSender.tab, url: assignedUrl },
+      url: assignedUrl,
+    };
+    assert.deepEqual(
+      await harness.fromContent({
+        type: "content.register",
+        provider: "chatgpt",
+        documentToken: "transient-competing-token",
+        conversationUrl: assignedUrl,
+        conversationIdentity: assignedIdentity,
+      }, assignedSender),
+      { success: true, registered: true },
+    );
+    assert.equal(
+      socket.sent.some((frame) => frame.type === "conversation.error" && frame.requestId === "first-turn"),
+      false,
+      "a competing registration killed the request that owns the tab",
+    );
+    assert.deepEqual(
+      await harness.fromContent({
+        type: "content.register",
+        provider: "chatgpt",
+        documentToken: harness.documentToken,
+        conversationUrl: assignedUrl,
+        conversationIdentity: assignedIdentity,
+      }, assignedSender),
+      { success: true, registered: true },
+    );
+    assert.equal(
+      socket.sent.some((frame) => frame.type === "conversation.error" && frame.requestId === "first-turn"),
+      false,
+      "an early registration of the provider-assigned route failed the pending first turn",
+    );
     const getsBefore = harness.tabCalls.filter((entry) => entry.call === "get").length;
     const messagesBefore = harness.tabMessages.length;
     const injectionsBefore = harness.injections.length;
@@ -5191,13 +5341,33 @@ test("a URL-less completion cannot disturb ChatGPT's pending first-turn transiti
       `the undisturbed first turn was not submitted: ${JSON.stringify(socket.sent)}`,
     );
 
-    const assignedUrl = "https://chatgpt.com/c/assigned";
-    const assignedIdentity = `chatgpt:${assignedUrl}`;
-    const assignedSender = {
-      ...harness.contentSender,
-      tab: { ...harness.contentSender.tab, url: assignedUrl },
-      url: assignedUrl,
-    };
+    // The page may expose its assigned route before either Chrome route API does. That is not
+    // enough to commit the transition, but it is enough to keep the one permitted transition
+    // retryable instead of making a temporary lag end response capture.
+    harness.setProviderTabs([{ id: 31, url: harness.providerUrl, title: "root still reported" }]);
+    assert.deepEqual(
+      await harness.fromContent({
+        type: "content.transition",
+        submissionCommitted: true,
+        requestId: "first-turn",
+        agentId: "agent-1",
+        sessionId: session.sessionId,
+        documentToken: harness.documentToken,
+        previousConversationUrl: harness.providerUrl,
+        conversationUrl: assignedUrl,
+        conversationIdentity: assignedIdentity,
+      }, assignedSender),
+      {
+        success: true,
+        accepted: false,
+        error: "Transition pending browser route confirmation",
+      },
+    );
+
+    // ChatGPT updates its active frame before tabs.get necessarily reflects the same history
+    // transition. The exact active document is the browser-vouched authority in that gap;
+    // rejecting it against the stale tab URL loses every later response frame under the root.
+    harness.setProviderFrameUrl(assignedUrl);
     assert.deepEqual(
       await harness.fromContent({
         type: "content.transition",
@@ -6641,6 +6811,54 @@ test("a bound tab that reloads is reinjected without manual rediscovery", async 
     assert.notEqual(reloaded, undefined, `the tab left the popup entirely: ${JSON.stringify(after)}`);
     assert.equal(reloaded.ready, true, `the reloaded tab never became usable: ${JSON.stringify(reloaded)}`);
     assert.equal(typeof reloaded.sessionId, "string", "the reloaded tab holds no session");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a selected tab releases ownership when it moves to another conversation", async () => {
+  const harness = await registeredDocumentHarness("conversation-release");
+  try {
+    await harness.pair();
+    await harness.selectAndReadSession();
+    const injectionsBefore = harness.injections.length;
+    const movedUrl = "https://chatgpt.com/c/moved-by-someone-else";
+    harness.setProviderTabs([{ id: 31, url: movedUrl, title: "someone else's chat" }]);
+    harness.historyEvent.listeners.forEach((listener) => listener({
+      tabId: 31,
+      frameId: 0,
+      url: movedUrl,
+      documentId: "registered-document-id",
+    }));
+    for (let turn = 0; turn < 10; turn += 1) await nextTurn();
+
+    assert.equal(
+      harness.tabMessages.some(({ message }) => message.type === "bachata.ownership.release"),
+      true,
+      "the old conversation kept the ownership favicon",
+    );
+
+    await harness.fromContent({
+      type: "content.register",
+      provider: "chatgpt",
+      documentToken: harness.documentToken,
+      conversationUrl: movedUrl,
+      conversationIdentity: `chatgpt:${movedUrl}`,
+    }, {
+      ...harness.contentSender,
+      tab: { id: 31, url: movedUrl },
+      url: movedUrl,
+    });
+    harness.updatedEvent.listeners.forEach((listener) => listener(31, { status: "complete" }));
+    for (let turn = 0; turn < 10; turn += 1) await nextTurn();
+
+    const state = await dispatchRuntimeMessage(harness.runtimeEvent.listeners[0], {
+      type: "popup.getState",
+    });
+    const moved = state.tabs?.find((tab) => tab.id === 31);
+    assert.equal(state.selectedTabId, undefined);
+    assert.equal(moved?.status, "unregistered");
+    assert.equal(harness.injections.length, injectionsBefore);
   } finally {
     harness.restore();
   }

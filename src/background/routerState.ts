@@ -342,6 +342,24 @@ export const senderBinding = (
 };
 
 /**
+ * Chrome keeps MessageSender.url at the document URL where a content script was injected.
+ * After same-document history navigation, tabs.get is the browser-vouched source of the current
+ * route. Preserve the sender's document identity and replace only its provider route.
+ */
+export const senderBindingAtUrl = (
+  binding: DocumentBinding,
+  value: unknown,
+): DocumentBinding | undefined => {
+  if (typeof value !== "string" || providerForUrl(value) !== binding.provider) return undefined;
+  const conversationUrl = canonicalConversationUrl(binding.provider, value);
+  return {
+    ...binding,
+    conversationUrl,
+    conversationIdentity: conversationIdentityFor(binding.provider, conversationUrl),
+  };
+};
+
+/**
  * Whether a running request belongs to the document and agent that just sent a message.
  *
  * A partial match is a mismatch: accepting one would let a stale document, or a different
@@ -383,7 +401,23 @@ export type InitialTransitionAdmission =
       conversationIdentity: string;
       binding: DocumentBinding;
     }
-  | { admitted: false };
+  | {
+      admitted: false;
+      reason:
+        | "request_missing"
+        | "binding_missing"
+        | "provider_mismatch"
+        | "tab_mismatch"
+        | "frame_mismatch"
+        | "document_mismatch"
+        | "token_mismatch"
+        | "agent_mismatch"
+        | "session_mismatch"
+        | "submission_uncommitted"
+        | "transition_not_allowed"
+        | "transition_already_used"
+        | "unsupported_transition";
+    };
 
 export const admitInitialTransition = (input: {
   request?: ActiveRequest | undefined;
@@ -396,29 +430,31 @@ export const admitInitialTransition = (input: {
   ) => boolean;
 }): InitialTransitionAdmission => {
   const { request, binding, message } = input;
-  if (
-    !request ||
-    !binding ||
-    request.provider !== binding.provider ||
-    request.tabId !== binding.tabId ||
-    request.frameId !== binding.frameId ||
-    request.documentId !== binding.documentId ||
-    request.documentToken !== binding.documentToken ||
-    request.agentId !== message.agentId ||
-    request.sessionId !== message.sessionId ||
-    // BR-G6-03. Only the content script knows whether the irreversible Send has happened, and
-    // it asserts that here. A transition claimed before submission is somebody else's
-    // navigation, not the conversation the provider assigned to this turn.
-    message.submissionCommitted !== true ||
-    !request.allowInitialConversationTransition ||
-    request.transitionUsed ||
-    !input.supportedTransition(
-      request.provider,
-      request.conversationUrl,
-      binding.conversationUrl,
-    )
-  ) {
-    return { admitted: false };
+  if (!request) return { admitted: false, reason: "request_missing" };
+  if (!binding) return { admitted: false, reason: "binding_missing" };
+  if (request.provider !== binding.provider) return { admitted: false, reason: "provider_mismatch" };
+  if (request.tabId !== binding.tabId) return { admitted: false, reason: "tab_mismatch" };
+  if (request.frameId !== binding.frameId) return { admitted: false, reason: "frame_mismatch" };
+  if (request.documentId !== binding.documentId) return { admitted: false, reason: "document_mismatch" };
+  if (request.documentToken !== binding.documentToken) return { admitted: false, reason: "token_mismatch" };
+  if (request.agentId !== message.agentId) return { admitted: false, reason: "agent_mismatch" };
+  if (request.sessionId !== message.sessionId) return { admitted: false, reason: "session_mismatch" };
+  // BR-G6-03. Only the content script knows whether the irreversible Send has happened, and
+  // it asserts that here. A transition claimed before submission is somebody else's
+  // navigation, not the conversation the provider assigned to this turn.
+  if (message.submissionCommitted !== true) {
+    return { admitted: false, reason: "submission_uncommitted" };
+  }
+  if (!request.allowInitialConversationTransition) {
+    return { admitted: false, reason: "transition_not_allowed" };
+  }
+  if (request.transitionUsed) return { admitted: false, reason: "transition_already_used" };
+  if (!input.supportedTransition(
+    request.provider,
+    request.conversationUrl,
+    binding.conversationUrl,
+  )) {
+    return { admitted: false, reason: "unsupported_transition" };
   }
   return {
     admitted: true,

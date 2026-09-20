@@ -14,13 +14,11 @@ import {
 
 const validToken = "a".repeat(43);
 const otherEndpoint = "ws://127.0.0.1:51000/bachata-browser-bridge-v9";
+const routedCode = `v9.51000.${validToken}`;
 
 /**
- * Paste & Pair is the whole first run in one control, so what it must never do is take the
- * endpoint from the clipboard: a clipboard is writable by any local process, and an endpoint read
- * out of it would point the Bridge at a port that process controls. The token is the only thing
- * that crosses, the endpoint comes from the prefilled field, and a clipboard that is not a token
- * is refused before anything is sent.
+ * Legacy tokens still pair against the visible endpoint. Arbitrary clipboard values remain
+ * invalid; only the constrained versioned pairing-code form may select another loopback port.
  */
 test("Paste & Pair carries only the token, and refuses a clipboard that is not one", async () => {
   const messages = [];
@@ -61,6 +59,101 @@ test("Paste & Pair carries only the token, and refuses a clipboard that is not o
     assert.ok(pair, "Paste & Pair did not pair on a valid token");
     assert.equal(pair.token, validToken, "the token was not the trimmed clipboard value");
     assert.equal(pair.endpoint, endpoint, "the endpoint did not come from the field");
+  } finally {
+    restore();
+  }
+});
+
+test("a pairing code discovers its Bridge port and sends only the raw token", async () => {
+  const messages = [];
+  const restore = installGlobals(
+    async (message) => {
+      messages.push(message);
+      return message.type === "popup.pair"
+        ? state({ revision: 2, connected: true, endpoint: otherEndpoint })
+        : state();
+    },
+    async () => routedCode,
+  );
+  try {
+    await import(`../dist/popup/index.js?routed-paste-pair=${String(Math.random())}`);
+    await nextTurn();
+
+    await click("token-paste-pair");
+    await nextTurn();
+    const pair = messages.find((message) => message.type === "popup.pair");
+    assert.ok(pair, "the routed pairing code did not pair");
+    assert.deepEqual(pair, { type: "popup.pair", endpoint: otherEndpoint, token: validToken });
+  } finally {
+    restore();
+  }
+});
+
+test("a pairing code pasted into the field discovers its Bridge port on submit", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return message.type === "popup.pair"
+      ? state({ revision: 2, connected: true, endpoint: otherEndpoint })
+      : state();
+  });
+  try {
+    await import(`../dist/popup/index.js?routed-field-pair=${String(Math.random())}`);
+    await nextTurn();
+
+    type("token", routedCode);
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    const pair = messages.find((message) => message.type === "popup.pair");
+    assert.ok(pair, "the typed pairing code did not pair");
+    assert.deepEqual(pair, { type: "popup.pair", endpoint: otherEndpoint, token: validToken });
+  } finally {
+    restore();
+  }
+});
+
+test("a failed routed pairing keeps the exact code and discovered port for retry", async () => {
+  const restore = installGlobals(
+    async (message) => message.type === "popup.pair"
+      ? state({
+        revision: 2,
+        connected: false,
+        endpoint: otherEndpoint,
+        error: "Could not connect to the Bachata VS Code extension",
+      })
+      : state(),
+    async () => routedCode,
+  );
+  try {
+    await import(`../dist/popup/index.js?routed-failure-retained=${String(Math.random())}`);
+    await nextTurn();
+
+    await click("token-paste-pair");
+    await nextTurn();
+    assert.equal(byId("token").value, routedCode, "the failed attempt erased or rewrote the pairing code");
+    assert.equal(byId("endpoint").value, otherEndpoint, "the discovered port was lost after failure");
+    assert.equal(byId("pair").hidden, false, "the retained code cannot be retried");
+    assert.match(byId("connection-error").textContent, /Could not connect/iu);
+  } finally {
+    restore();
+  }
+});
+
+test("a pairing code cannot carry an invalid or out-of-range port", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state({ revision: 2 });
+  });
+  try {
+    await import(`../dist/popup/index.js?routed-invalid=${String(Math.random())}`);
+    await nextTurn();
+
+    type("token", `v9.65536.${validToken}`);
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    assert.equal(messages.some((message) => message.type === "popup.pair"), false);
+    assert.match(byId("token-error").textContent, /pairing code is invalid/iu);
   } finally {
     restore();
   }

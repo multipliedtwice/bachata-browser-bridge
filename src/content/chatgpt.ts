@@ -12,6 +12,7 @@ if (!bachataChatGptLogic || !bachataAssetLogic || !bachataProviderControls || !b
 const {
   canonicalConversationUrl,
   canonicalizeRenderedPrompt,
+  chatGptRenderedPromptVariants,
   composeCapturedResponse,
   conversationIdentityFor,
   chatGptAlertCandidates,
@@ -672,11 +673,24 @@ const matchingNewUsers = (
   currentMessages(userSelector).filter(
     (element) =>
       !binding.previousUsers.has(element) &&
-      canonicalizeRenderedPrompt(element.innerText) === binding.text,
+      chatGptRenderedPromptVariants(element).some(
+        (candidate) => canonicalizeRenderedPrompt(candidate) === binding.text,
+      ),
+  );
+
+const submittedPromptMatches = (element: HTMLElement, expected: string): boolean =>
+  chatGptRenderedPromptVariants(element).some(
+    (candidate) => canonicalizeRenderedPrompt(candidate) === expected,
   );
 
 const resolveSubmittedUser = (binding: SubmittedUserBinding): HTMLElement => {
   if (binding.providerMessageId) {
+    if (
+      binding.element.isConnected &&
+      messageId(binding.element) === binding.providerMessageId
+    ) {
+      return binding.element;
+    }
     const matches = currentMessages(userSelector).filter(
       (element) => messageId(element) === binding.providerMessageId,
     );
@@ -690,7 +704,7 @@ const resolveSubmittedUser = (binding: SubmittedUserBinding): HTMLElement => {
   }
   if (
     binding.element.isConnected &&
-    canonicalizeRenderedPrompt(binding.element.innerText) === binding.text
+    submittedPromptMatches(binding.element, binding.text)
   ) {
     return binding.element;
   }
@@ -713,6 +727,7 @@ const waitForSubmittedPrompt = createSubmittedPromptWaiter({
   ensureConversationBinding,
   userMessages: () => currentMessages(userSelector),
   messageId,
+  promptMatches: submittedPromptMatches,
   healDom: () => healDom(),
   delay,
 });
@@ -733,6 +748,12 @@ const newAssistantsAfterUser = (
 
 const resolveBoundResponse = (binding: ResponseBinding): HTMLElement => {
   if (binding.providerMessageId) {
+    if (
+      binding.element.isConnected &&
+      messageId(binding.element) === binding.providerMessageId
+    ) {
+      return binding.element;
+    }
     const matches = currentMessages(assistantSelector).filter(
       (element) => messageId(element) === binding.providerMessageId,
     );
@@ -1056,6 +1077,7 @@ const captureResponse = async (
     throw new Error("Timed out waiting for ChatGPT response completion");
   } catch (cause) {
     if (!cancelledRequests.has(request.requestId)) {
+      await interruptAndConfirm(request.requestId, true).catch(() => false);
       quarantineConversation("chatgpt", request.conversationIdentity);
       await sendBackground({
         type: "content.error",
@@ -1354,7 +1376,7 @@ const submit = async (
     void monitorIndeterminateRequest(request);
     return {
       submitted: false,
-      error: "ChatGPT may still be generating because submission could not be verified or interrupted. Stop it manually before continuing.",
+      error: `ChatGPT may still be generating because submission could not be verified or interrupted. Stop it manually before continuing. Original failure: ${error}`,
     };
   }
 };

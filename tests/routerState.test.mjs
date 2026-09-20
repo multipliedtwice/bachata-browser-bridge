@@ -15,6 +15,7 @@ import {
   providerStartUrl,
   sameDocumentBinding,
   senderBinding,
+  senderBindingAtUrl,
   sessionIdFor,
   storageKey,
   storedStateFrom,
@@ -530,6 +531,28 @@ test("a sender without a document id binds without one", () => {
   assert.equal(senderBinding(sender({ documentId: 7 }), "token-1")?.documentId, undefined);
 });
 
+test("a same-document route uses the tab's current URL without changing document identity", () => {
+  const injected = senderBinding(sender({ url: "https://chatgpt.com/" }), "token-1");
+  assert.deepEqual(
+    senderBindingAtUrl(injected, "https://chatgpt.com/c/assigned?temporary=true#section"),
+    {
+      provider: "chatgpt",
+      tabId: 7,
+      frameId: 0,
+      documentId: "doc-1",
+      documentToken: "token-1",
+      conversationUrl: "https://chatgpt.com/c/assigned",
+      conversationIdentity: "chatgpt:https://chatgpt.com/c/assigned",
+    },
+  );
+});
+
+test("a tab URL outside the sender's provider cannot rewrite its binding", () => {
+  const injected = senderBinding(sender(), "token-1");
+  assert.equal(senderBindingAtUrl(injected, "https://claude.ai/new"), undefined);
+  assert.equal(senderBindingAtUrl(injected, undefined), undefined);
+});
+
 test("a running request matches only the sender and agent that own it", () => {
   const bound = senderBinding(sender(), "token-1");
   const request = activeRequest({ conversationIdentity: bound.conversationIdentity });
@@ -895,39 +918,51 @@ test("an initial transition is admitted and reports the exact state the caller m
 });
 
 test("a transition with no request behind it, or no sender binding, is refused", () => {
-  assert.deepEqual(admitTransition({ request: undefined }), { admitted: false });
-  assert.deepEqual(admitTransition({ binding: undefined }), { admitted: false });
+  assert.deepEqual(admitTransition({ request: undefined }), {
+    admitted: false,
+    reason: "request_missing",
+  });
+  assert.deepEqual(admitTransition({ binding: undefined }), {
+    admitted: false,
+    reason: "binding_missing",
+  });
 });
 
 test("a transition from a document that is not the request's own is refused", () => {
-  for (const change of [
-    { provider: "claude" },
-    { tabId: 5 },
-    { frameId: 1 },
-    { documentId: "doc-2" },
-    { documentToken: "token-2" },
+  for (const [change, reason] of [
+    [{ provider: "claude" }, "provider_mismatch"],
+    [{ tabId: 5 }, "tab_mismatch"],
+    [{ frameId: 1 }, "frame_mismatch"],
+    [{ documentId: "doc-2" }, "document_mismatch"],
+    [{ documentToken: "token-2" }, "token_mismatch"],
   ]) {
     assert.deepEqual(
       admitTransition({ binding: transitionBinding(change) }),
-      { admitted: false },
+      { admitted: false, reason },
       JSON.stringify(change),
     );
   }
 });
 
 test("a transition naming another agent or another session is refused", () => {
-  assert.deepEqual(admitTransition({ message: transitionMessage({ agentId: "agent-2" }) }), { admitted: false });
-  assert.deepEqual(admitTransition({ message: transitionMessage({ sessionId: "session-2" }) }), { admitted: false });
+  assert.deepEqual(admitTransition({ message: transitionMessage({ agentId: "agent-2" }) }), {
+    admitted: false,
+    reason: "agent_mismatch",
+  });
+  assert.deepEqual(admitTransition({ message: transitionMessage({ sessionId: "session-2" }) }), {
+    admitted: false,
+    reason: "session_mismatch",
+  });
 });
 
 test("a request that never allowed a transition, or already used one, is refused", () => {
   assert.deepEqual(
     admitTransition({ request: transitionRequest({ allowInitialConversationTransition: false }) }),
-    { admitted: false },
+    { admitted: false, reason: "transition_not_allowed" },
   );
   assert.deepEqual(
     admitTransition({ request: transitionRequest({ transitionUsed: true }) }),
-    { admitted: false },
+    { admitted: false, reason: "transition_already_used" },
   );
 });
 
@@ -939,7 +974,7 @@ test("a transition that does not assert a committed submission is refused", () =
   for (const claim of [undefined, false, "true", 1]) {
     assert.deepEqual(
       admitTransition({ message: transitionMessage({ submissionCommitted: claim }) }),
-      { admitted: false },
+      { admitted: false, reason: "submission_uncommitted" },
       JSON.stringify(claim ?? null),
     );
   }
@@ -954,7 +989,7 @@ test("the supported-transition rule is asked with the request's own before and a
     },
   });
   assert.deepEqual(asked, [["chatgpt", "https://chatgpt.com/", "https://chatgpt.com/c/new-one"]]);
-  assert.deepEqual(admission, { admitted: false });
+  assert.deepEqual(admission, { admitted: false, reason: "unsupported_transition" });
 });
 
 // BB-A4-F19. A pairing made under an earlier protocol survives the upgrade wherever storage kept

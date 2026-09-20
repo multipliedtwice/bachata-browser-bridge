@@ -48,6 +48,16 @@ const capture = (options = {}) => captureGenericResponse(
   options.attestOwnership,
 );
 
+const captureClock = (context) => {
+  let clockMs = 2_000_000;
+  context.mock.method(Date, "now", () => clockMs);
+  context.mock.method(globalThis, "setTimeout", (callback, delayMs, ...args) => {
+    clockMs += Math.max(1, delayMs);
+    queueMicrotask(() => callback(...args));
+  });
+  return { advance: (ms) => { clockMs += ms; } };
+};
+
 test("a cancelled capture aborts instead of returning a partial answer", async () => {
   conversation(assistant("<p>partial answer</p>"));
   const controller = new AbortController();
@@ -356,6 +366,182 @@ test("a conversation that changes during the last stream frame is not finalized"
   assert.ok(failure instanceof Error, "a response was finalized after its conversation changed");
   assert.match(failure.message, /nonce is no longer present in the active generic conversation/u);
 });
+
+test("a connected response changed during the final stream is captured consistently after a new quiet period", async (context) => {
+  captureClock(context);
+  const oldControl = '{"action":"old-managed-payload"}';
+  const newControl = '{"action":"new-managed-payload"}';
+  const oldText = `Old payload.\n${oldControl}`;
+  const newText = `New payload.\n${newControl}`;
+  conversation(assistant(`<p>Old payload.</p><pre><code class="language-bachata-control">${oldControl}</code></pre>`));
+  const response = dom.query('[data-message-author-role="assistant"]');
+  let changedAt;
+  let confirmedAt;
+  let observationsAfterChange = 0;
+  const captured = await capture({
+    generationActive: () => {
+      if (changedAt !== undefined) observationsAfterChange += 1;
+      return false;
+    },
+    lifecycle: settledLifecycle(),
+    onStream: async (text) => {
+      if (text === oldText && changedAt === undefined) {
+        await Promise.resolve();
+        changedAt = Date.now();
+        response.innerHTML = `<p>New payload.</p><pre><code class="language-bachata-control">${newControl}</code></pre>`;
+        assert.equal(response.isConnected, true);
+        assert.equal(dom.query('[data-message-author-role="assistant"]'), response);
+      } else if (text === newText) {
+        confirmedAt = Date.now();
+      }
+    },
+  });
+  assert.notEqual(changedAt, undefined, "the final stream boundary was never raced");
+  assert.equal(captured.text, newText);
+  assert.equal(captured.markdown, `New payload.\n\n\`\`\`bachata-control\n${newControl}\n\`\`\``);
+  assert.deepEqual(captured.segments.filter((segment) => segment.type === "codeBlock"), [{
+    type: "codeBlock",
+    text: newControl,
+    start: "New payload.\n".length,
+    end: newText.length,
+    language: "bachata-control",
+  }]);
+  assert.equal(captured.segments.map((segment) => segment.text).join(""), newText);
+  for (const segment of captured.segments) {
+    assert.equal(captured.text.slice(segment.start, segment.end), segment.text);
+  }
+  assert.doesNotMatch(JSON.stringify(captured.segments), /old-managed-payload/u);
+  assert.doesNotMatch(captured.text + captured.markdown, /old-managed-payload/u);
+  assert.ok(observationsAfterChange > 0, "the changed response never had its lifecycle rechecked");
+  assert.ok(confirmedAt - changedAt >= 2_500, "the changed payload reused the old quiet confirmation");
+  assert.equal(captured.attestation.responseElement, response);
+});
+
+test("code language changes with identical text require a new final confirmation", async (context) => {
+  captureClock(context);
+  const finalText = "Answer.\nconst value = 1;";
+  conversation(assistant('<p>Answer.</p><pre><code class="language-js">const value = 1;</code></pre>'));
+  let changedAt;
+  let confirmedAt;
+  const captured = await capture({
+    generationActive: () => false,
+    lifecycle: settledLifecycle(),
+    onStream: async (text) => {
+      if (text !== finalText) return;
+      if (changedAt === undefined) {
+        await Promise.resolve();
+        changedAt = Date.now();
+        dom.query("code").className = "language-ts";
+      } else {
+        confirmedAt = Date.now();
+      }
+    },
+  });
+  assert.notEqual(changedAt, undefined);
+  assert.equal(captured.text, finalText);
+  assert.equal(captured.segments.find((segment) => segment.type === "codeBlock").language, "ts");
+  assert.match(captured.markdown, /```ts\nconst value = 1;\n```/u);
+  assert.ok(confirmedAt - changedAt >= 2_500, "a metadata-only change reused the old quiet confirmation");
+});
+
+test("a newer response candidate appearing during the final stream must settle before return", async (context) => {
+  captureClock(context);
+  conversation(assistant("<p>Older.</p><pre><code>old</code></pre>"));
+  const older = dom.query('[data-message-author-role="assistant"]');
+  let changedAt;
+  let confirmedAt;
+  const captured = await capture({
+    generationActive: () => false,
+    lifecycle: settledLifecycle(),
+    onStream: async (text) => {
+      if (text === "Older.\nold" && changedAt === undefined) {
+        await Promise.resolve();
+        changedAt = Date.now();
+        dom.query("#root").insertAdjacentHTML("beforeend", assistant("<p>Newer.</p><pre><code>new</code></pre>"));
+      } else if (text === "Newer.\nnew") {
+        confirmedAt = Date.now();
+      }
+    },
+  });
+  assert.notEqual(changedAt, undefined);
+  assert.equal(older.isConnected, true);
+  assert.equal(captured.text, "Newer.\nnew");
+  assert.notEqual(captured.attestation.responseElement, older);
+  assert.ok(confirmedAt - changedAt >= 2_500, "a new candidate reused the old quiet confirmation");
+});
+
+test("generation resuming during the final stream must end and become quiet again", async (context) => {
+  captureClock(context);
+  conversation(assistant("<p>Answer.</p><pre><code>value</code></pre>"));
+  let resumedAt;
+  let endedAt;
+  let resumedObserved = false;
+  let confirmedAt;
+  const captured = await capture({
+    generationActive: () => {
+      if (resumedAt !== undefined && !resumedObserved) {
+        resumedObserved = true;
+        return true;
+      }
+      if (resumedObserved) endedAt ??= Date.now();
+      return false;
+    },
+    lifecycle: settledLifecycle(),
+    onStream: async (text) => {
+      if (text !== "Answer.\nvalue") return;
+      if (resumedAt === undefined) {
+        await Promise.resolve();
+        resumedAt = Date.now();
+      } else {
+        confirmedAt = Date.now();
+      }
+    },
+  });
+  assert.notEqual(resumedAt, undefined);
+  assert.equal(resumedObserved, true, "the resumed generation was never observed");
+  assert.ok(confirmedAt - endedAt >= 2_500, "the resumed generation reused the old idle confirmation");
+  assert.equal(captured.text, "Answer.\nvalue");
+});
+
+for (const invalidation of ["later user turn", "anchor outside root", "cancellation", "deadline"]) {
+  test(`the final stream cannot finalize after ${invalidation}`, async (context) => {
+    const clock = captureClock(context);
+    conversation(assistant("<p>Answer.</p><pre><code>value</code></pre>"));
+    const controller = new AbortController();
+    const lifecycle = settledLifecycle();
+    let raced = false;
+    const failure = await capture({
+      signal: controller.signal,
+      generationActive: () => false,
+      lifecycle,
+      onStream: async (text) => {
+        if (text !== "Answer.\nvalue" || raced) return;
+        await Promise.resolve();
+        raced = true;
+        if (invalidation === "later user turn") {
+          dom.query("#root").insertAdjacentHTML("beforeend", '<article data-message-author-role="user">Another question</article>');
+        } else if (invalidation === "anchor outside root") {
+          dom.document.body.appendChild(dom.query('[data-message-author-role="user"]'));
+        } else if (invalidation === "cancellation") {
+          controller.abort();
+        } else {
+          clock.advance(lifecycle.deadlineAt - Date.now());
+        }
+      },
+    }).then((value) => value, (error) => error);
+    assert.equal(raced, true, "the final stream boundary was never raced");
+    assert.ok(failure instanceof Error, "an invalidated response was finalized");
+    if (invalidation === "later user turn") {
+      assert.match(failure.message, /Another user turn appeared/u);
+    } else if (invalidation === "anchor outside root") {
+      assert.match(failure.message, /nonce is no longer present/u);
+    } else if (invalidation === "cancellation") {
+      assert.equal(failure.name, "AbortError");
+    } else {
+      assert.match(failure.message, /Timed out/u);
+    }
+  });
+}
 
 // BR-G6-13. A site that marks up its bubbles as well as its turns matches the message selector
 // twice over. The anchor used to be the innermost of those, so the rest of the user's own turn —

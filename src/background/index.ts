@@ -99,6 +99,7 @@ import {
   providerStartUrl,
   sameDocumentBinding,
   senderBinding,
+  senderBindingAtUrl,
   sessionIdFor,
   storageKey,
   storedStateFrom,
@@ -185,6 +186,7 @@ let pairingToken: string | undefined;
 let reconnectAttempt = 0;
 let retryInMs: number | undefined;
 const documentsByTab = new Map<number, DocumentBinding>();
+const releasedTabIds = new Set<number>();
 const sessionCreatedAt = new Map<string, string>();
 const activeRequests = new Map<string, ActiveRequest>();
 const popupRecoveryStore = createPopupRecoveryStore();
@@ -247,6 +249,7 @@ const sendSocket = (message: ClientMessage): void => {
 };
 
 const rememberHandledTabs = (tabIds: number[]): void => {
+  tabIds.forEach((tabId) => releasedTabIds.delete(tabId));
   stored.handledTabIds = withHandledTabs(stored, tabIds);
 };
 
@@ -330,7 +333,9 @@ const waitForDocumentRegistration = async (
   return documentsByTab.has(tabId);
 };
 
-const ensureContentScript = async (tabId: number): Promise<void> => {
+const contentScriptOperations = new Map<number, Promise<void>>();
+
+const runContentScriptEnsure = async (tabId: number): Promise<void> => {
   const tab = await chrome.tabs.get(tabId);
   const provider = typeof tab.url === "string" ? providerForUrl(tab.url) : undefined;
   if (!provider) {
@@ -385,6 +390,48 @@ const ensureContentScript = async (tabId: number): Promise<void> => {
     return;
   }
   throw new Error("The browser provider page did not register with Bachata");
+};
+
+const ensureContentScript = (tabId: number): Promise<void> => {
+  const current = contentScriptOperations.get(tabId);
+  if (current) return current;
+  const operation = runContentScriptEnsure(tabId).finally(() => {
+    if (contentScriptOperations.get(tabId) === operation) {
+      contentScriptOperations.delete(tabId);
+    }
+  });
+  contentScriptOperations.set(tabId, operation);
+  return operation;
+};
+
+const activateOwnedFavicon = async (session: Pick<BrowserSession, "tabId" | "documentId">): Promise<void> => {
+  await chrome.scripting.executeScript({
+    target: session.documentId
+      ? { tabId: session.tabId, documentIds: [session.documentId] }
+      : { tabId: session.tabId, frameIds: [0] },
+    files: ["content/ownedFavicon.js"],
+    world: "ISOLATED",
+  });
+};
+
+const releaseOwnedFavicon = async (tabId: number): Promise<void> => {
+  await chrome.tabs.sendMessage(
+    tabId,
+    { type: "bachata.ownership.release" },
+    { frameId: 0 },
+  ).catch(() => undefined);
+};
+
+const selectOwnedSession = async (session: BrowserSession): Promise<void> => {
+  await activateOwnedFavicon(session);
+  const previousTabId = stored.selectedTabId;
+  stored.selectedTabId = session.tabId;
+  stored.selectedSessionId = session.id;
+  rememberHandledTabs([session.tabId]);
+  await saveStored();
+  if (previousTabId !== undefined && previousTabId !== session.tabId) {
+    await releaseOwnedFavicon(previousTabId);
+  }
 };
 
 const contentStatus = async (
@@ -460,7 +507,9 @@ const buildSessions = async (
   const tabById = new Map(availableTabs.map((tab) => [tab.id, tab]));
   const now = new Date().toISOString();
   const candidates = Array.from(documentsByTab.values())
-    .filter((binding) => bindingIsLiveOnTab(binding, tabById.get(binding.tabId)))
+    .filter((binding) =>
+      !releasedTabIds.has(binding.tabId)
+      && bindingIsLiveOnTab(binding, tabById.get(binding.tabId)))
     .sort((left, right) => left.tabId - right.tabId);
   const statuses = await Promise.allSettled(candidates.map(contentStatus));
   const sessions: BrowserSession[] = [];
@@ -536,9 +585,13 @@ const publishProviderStatus = async (revision: number): Promise<void> => {
     return;
   }
   if (stored.selectedSessionId && !selected) {
+    const releasedTabId = stored.selectedTabId;
     stored.selectedSessionId = undefined;
     stored.selectedTabId = undefined;
     await saveStored();
+    if (releasedTabId !== undefined) {
+      await releaseOwnedFavicon(releasedTabId);
+    }
     if (!connected || revision !== providerStatusRevision) {
       return;
     }
@@ -603,7 +656,10 @@ const provisionProviderConversation = async (
       if (selected === undefined) {
         return { provider, success: false, ...selection.refusal };
       }
-      if (!fresh) return { provider, success: true, session: selected };
+      if (!fresh) {
+        await selectOwnedSession(selected);
+        return { provider, success: true, session: selected };
+      }
       throwIfAborted(signal);
       await ensureGenericContentScript(selected.tabId);
       let commandResult: unknown;
@@ -632,11 +688,17 @@ const provisionProviderConversation = async (
       if (verdict.session === undefined) {
         return { provider, success: false, ...verdict.refusal };
       }
+      await selectOwnedSession(verdict.session);
       return { provider, success: true, session: verdict.session };
     }
     const reopen = await planConversationReopen({ provider, fresh, preferredConversationIdentity, readSessions: buildSessions, signal });
     const shortcut = reopenShortcut(reopen);
-    if (shortcut) return { provider, ...shortcut };
+    if (shortcut) {
+      if (shortcut.success && shortcut.session) {
+        await selectOwnedSession(shortcut.session);
+      }
+      return { provider, ...shortcut };
+    }
     if (fresh && preferredTabId !== undefined) {
       const reusable = await chrome.tabs.get(preferredTabId).catch(() => undefined);
       // BB-A4-F10. The signal is read again here because the lookup is an await: a Disconnect
@@ -674,6 +736,7 @@ const provisionProviderConversation = async (
         if (refusal) {
           return { provider, success: false, ...refusal };
         }
+        await selectOwnedSession(session);
         return { provider, success: true, session };
       }
     }
@@ -709,6 +772,7 @@ const provisionProviderConversation = async (
       if (reopen.kind === "navigate") await closeCreatedTab(createdTabId);
       return { provider, success: false, ...openedRefusal };
     }
+    await selectOwnedSession(session);
     return { provider, success: true, session };
   } catch (cause) {
     if (signal.aborted) {
@@ -1943,9 +2007,14 @@ const initialize = async (): Promise<void> => {
   await loadStored();
   await restoreGenericRegistrations().catch(() => undefined);
   reconnectAttempt = stored.reconnectAttempt ?? 0;
-  const handled = new Set(normalizedHandledTabIds(stored));
+  const handled = new Set<number>();
   if (stored.selectedTabId) {
     handled.add(stored.selectedTabId);
+  }
+  const startupHandledTabIds = handled.size > 0 ? [...handled] : undefined;
+  if (JSON.stringify(stored.handledTabIds) !== JSON.stringify(startupHandledTabIds)) {
+    stored.handledTabIds = startupHandledTabIds;
+    await saveStored();
   }
   const tabs = await queryTabs();
   await Promise.allSettled(
@@ -1953,6 +2022,14 @@ const initialize = async (): Promise<void> => {
       tab.provider === "generic" ? ensureGenericContentScript(tab.id) : ensureContentScript(tab.id),
     ),
   );
+  if (stored.selectedTabId !== undefined) {
+    const selectedSession = (await buildSessions()).find(
+      (session) => session.tabId === stored.selectedTabId,
+    );
+    if (selectedSession) {
+      await selectOwnedSession(selectedSession).catch(() => undefined);
+    }
+  }
   const genericOrigins = new Set(await storedGenericProfileOrigins());
   const restoredTabs = await chrome.tabs.query({});
   await Promise.allSettled(
@@ -2032,12 +2109,69 @@ const popupState = async (): Promise<PopupState> =>
     tabs: await buildPopupTabs(),
   });
 
-const validActiveSender = (
+const currentSenderBinding = async (
+  sender: chrome.runtime.MessageSender,
+  documentToken: unknown,
+): Promise<DocumentBinding | undefined> => {
+  const injectedBinding = senderBinding(sender, documentToken);
+  if (!injectedBinding) return undefined;
+  let frame: Awaited<ReturnType<typeof chrome.webNavigation.getFrame>> | undefined;
+  try {
+    frame = await chrome.webNavigation.getFrame({
+      tabId: injectedBinding.tabId,
+      frameId: injectedBinding.frameId,
+    });
+  } catch {
+    frame = undefined;
+  }
+  if (
+    frame?.documentLifecycle === "active" &&
+    (injectedBinding.documentId === undefined || frame.documentId === injectedBinding.documentId)
+  ) {
+    const frameBinding = senderBindingAtUrl(injectedBinding, frame.url);
+    if (frameBinding) return frameBinding;
+  }
+  const tab = await chrome.tabs.get(injectedBinding.tabId).catch(() => undefined);
+  return senderBindingAtUrl(injectedBinding, tab?.url);
+};
+
+const transitionBindingWaitMs = 2_000;
+const transitionBindingPollMs = 50;
+
+const awaitTransitionSenderBinding = async (
   message: Record<string, unknown>,
   sender: chrome.runtime.MessageSender,
-): ActiveRequest | undefined => {
+  request: ActiveRequest | undefined,
+): Promise<DocumentBinding | undefined> => {
+  let binding = await currentSenderBinding(sender, message.documentToken);
+  const injectedBinding = senderBinding(sender, message.documentToken);
+  const claimedBinding = injectedBinding
+    ? senderBindingAtUrl(injectedBinding, message.conversationUrl)
+    : undefined;
+  const claimedAdmission = admitInitialTransition({
+    ...(request ? { request } : {}),
+    ...(claimedBinding ? { binding: claimedBinding } : {}),
+    message,
+    supportedTransition: isSupportedInitialTransition,
+  });
+  if (!claimedAdmission.admitted) return binding;
+  const deadline = Math.min(request?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + transitionBindingWaitMs);
+  while (
+    binding?.conversationIdentity !== claimedAdmission.conversationIdentity &&
+    Date.now() < deadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, transitionBindingPollMs));
+    binding = await currentSenderBinding(sender, message.documentToken);
+  }
+  return binding;
+};
+
+const validActiveSender = async (
+  message: Record<string, unknown>,
+  sender: chrome.runtime.MessageSender,
+): Promise<ActiveRequest | undefined> => {
   const request = activeRequests.get(String(message.requestId));
-  const binding = senderBinding(sender, message.documentToken);
+  const binding = await currentSenderBinding(sender, message.documentToken);
   if (!request || !binding || !activeRequestMatchesSender(request, binding, message)) {
     return undefined;
   }
@@ -2049,19 +2183,46 @@ const applyTransition = async (
   sender: chrome.runtime.MessageSender,
 ): Promise<ContentAck> => {
   const request = activeRequests.get(String(message.requestId));
+  // Chrome can expose a same-document ChatGPT URL to the page before tabs.get reflects the
+  // matching history update. The content script announces that transition immediately after
+  // submission, so require the browser-vouched route but give that route a short bounded window
+  // to catch up. The claimed route is used only to decide whether waiting is justified; the
+  // admission below still commits exclusively from the observed tab binding.
+  const binding = await awaitTransitionSenderBinding(message, sender, request);
   // BB-AUD-09. Whether the move is allowed is decided in `routerState.ts`; what stays here is
   // reading the sender and writing what the decision authorised.
   const admission = admitInitialTransition({
     ...(request ? { request } : {}),
-    ...(() => {
-      const binding = senderBinding(sender, message.documentToken);
-      return binding ? { binding } : {};
-    })(),
+    ...(binding ? { binding } : {}),
     message,
     supportedTransition: isSupportedInitialTransition,
   });
   if (!admission.admitted) {
-    return { success: false, accepted: false, error: "Transition rejected" };
+    const injectedBinding = senderBinding(sender, message.documentToken);
+    const claimedBinding = injectedBinding
+      ? senderBindingAtUrl(injectedBinding, message.conversationUrl)
+      : undefined;
+    const claimedAdmission = admitInitialTransition({
+      ...(request ? { request } : {}),
+      ...(claimedBinding ? { binding: claimedBinding } : {}),
+      message,
+      supportedTransition: isSupportedInitialTransition,
+    });
+    if (
+      claimedAdmission.admitted &&
+      (admission.reason === "binding_missing" || admission.reason === "unsupported_transition")
+    ) {
+      return {
+        success: true,
+        accepted: false,
+        error: "Transition pending browser route confirmation",
+      };
+    }
+    return {
+      success: false,
+      accepted: false,
+      error: `Transition rejected: ${admission.reason}`,
+    };
   }
   if (request) {
     request.conversationUrl = admission.conversationUrl;
@@ -2075,12 +2236,12 @@ const applyTransition = async (
   return { success: true, accepted: true };
 };
 
-const validAssetSender = (
+const validAssetSender = async (
   input: Record<string, unknown>,
   sender: chrome.runtime.MessageSender,
-): ActiveAssetTransfer | undefined => {
+): Promise<ActiveAssetTransfer | undefined> => {
   const transfer = activeAssetTransfers.get(String(input.transferId));
-  const binding = senderBinding(sender, input.documentToken);
+  const binding = await currentSenderBinding(sender, input.documentToken);
   if (
     !transfer ||
     transfer.assetId !== input.assetId ||
@@ -2112,7 +2273,7 @@ chrome.runtime.onMessage.addListener(
       }
       const input = message as Record<string, unknown>;
       if (input.type === "content.register") {
-        const binding = senderBinding(sender, input.documentToken);
+        const binding = await currentSenderBinding(sender, input.documentToken);
         if (
           !binding ||
           canonicalConversationUrl(binding.provider, String(input.conversationUrl)) !==
@@ -2123,19 +2284,27 @@ chrome.runtime.onMessage.addListener(
           throw new Error("Invalid browser document registration");
         }
         const previous = documentsByTab.get(binding.tabId);
-        const activeTransition = Array.from(activeRequests.values()).some(
+        const tabRequest = Array.from(activeRequests.values()).find(
           (request) =>
             request.provider === binding.provider &&
-            request.tabId === binding.tabId &&
-            request.documentToken === binding.documentToken &&
-            request.conversationIdentity === binding.conversationIdentity,
+            request.tabId === binding.tabId,
         );
+        const transitionRequest =
+          tabRequest?.documentToken === binding.documentToken
+            ? tabRequest
+            : undefined;
+        const activeTransition =
+          transitionRequest !== undefined &&
+          transitionRequest.conversationIdentity === binding.conversationIdentity;
         if (
           previous &&
           !activeTransition &&
           (previous.documentToken !== binding.documentToken ||
             previous.conversationIdentity !== binding.conversationIdentity)
         ) {
+          if (tabRequest) {
+            return { success: true, registered: true } satisfies ContentAck;
+          }
           failRequestsForTab(
             binding.tabId,
             "The selected browser document changed",
@@ -2144,6 +2313,7 @@ chrome.runtime.onMessage.addListener(
             stored.selectedTabId = undefined;
             stored.selectedSessionId = undefined;
             await saveStored();
+            await releaseOwnedFavicon(binding.tabId);
           }
         }
         documentsByTab.set(binding.tabId, binding);
@@ -2223,6 +2393,8 @@ chrome.runtime.onMessage.addListener(
         if (!Number.isInteger(tabId) || tabId <= 0) {
           throw new Error("Select a valid browser tab");
         }
+        rememberHandledTabs([tabId]);
+        await saveStored();
         if (isGenericTab(tabId)) {
           await ensureGenericContentScript(tabId);
         } else {
@@ -2236,17 +2408,18 @@ chrome.runtime.onMessage.addListener(
         if (selected.status !== "ready") {
           throw new Error(popupStatusReason(selected.status));
         }
-        stored.selectedTabId = tabId;
-        stored.selectedSessionId = selected.id;
-        rememberHandledTabs([tabId]);
-        await saveStored();
+        await selectOwnedSession(selected);
         await sendProviderStatus();
         return popupState();
       }
       if (input.type === "popup.deselect") {
+        const releasedTabId = stored.selectedTabId;
         stored.selectedTabId = undefined;
         stored.selectedSessionId = undefined;
         await saveStored();
+        if (releasedTabId !== undefined) {
+          await releaseOwnedFavicon(releasedTabId);
+        }
         await sendProviderStatus();
         return popupState();
       }
@@ -2276,13 +2449,16 @@ chrome.runtime.onMessage.addListener(
         clearReconnectTimer();
         clearReconnectPersistence();
         clearKeepAliveTimer();
+        if (stored.selectedTabId !== undefined) {
+          await releaseOwnedFavicon(stored.selectedTabId);
+        }
         stored = {};
         pairingToken = undefined;
         await saveStored();
         return popupState();
       }
       if (input.type === "content.stream") {
-        const request = validActiveSender(input, sender);
+        const request = await validActiveSender(input, sender);
         if (!request || !connected) {
           return { success: false, error: "Stale or disconnected stream" };
         }
@@ -2315,7 +2491,7 @@ chrome.runtime.onMessage.addListener(
           return { success: false, error: "Invalid response" };
         }
         const responseRecord = response as Record<string, unknown>;
-        const request = validActiveSender(
+        const request = await validActiveSender(
           { ...responseRecord, documentToken: input.documentToken },
           sender,
         );
@@ -2406,7 +2582,7 @@ chrome.runtime.onMessage.addListener(
         return { success: true } satisfies ContentAck;
       }
       if (input.type === "content.asset.start") {
-        const transfer = validAssetSender(input, sender);
+        const transfer = await validAssetSender(input, sender);
         const start = transfer && connected ? parseAssetStart(transfer, input) : undefined;
         if (!transfer || !start) {
           return { success: false, error: "Invalid asset transfer start" };
@@ -2425,7 +2601,7 @@ chrome.runtime.onMessage.addListener(
         return { success: true } satisfies ContentAck;
       }
       if (input.type === "content.asset.chunk") {
-        const transfer = validAssetSender(input, sender);
+        const transfer = await validAssetSender(input, sender);
         const bytes = strictBase64Bytes(input.dataBase64);
         const chunk = transfer && connected
           ? parseAssetChunk(transfer, input, bytes)
@@ -2455,7 +2631,7 @@ chrome.runtime.onMessage.addListener(
         return { success: true } satisfies ContentAck;
       }
       if (input.type === "content.asset.complete") {
-        const transfer = validAssetSender(input, sender);
+        const transfer = await validAssetSender(input, sender);
         const completion = transfer && connected
           ? parseAssetCompletion(transfer, input)
           : undefined;
@@ -2483,7 +2659,7 @@ chrome.runtime.onMessage.addListener(
         return { success: true } satisfies ContentAck;
       }
       if (input.type === "content.asset.error") {
-        const transfer = validAssetSender(input, sender);
+        const transfer = await validAssetSender(input, sender);
         if (!transfer || !connected) {
           return { success: false, error: "Stale asset transfer error" };
         }
@@ -2501,7 +2677,7 @@ chrome.runtime.onMessage.addListener(
         return { success: true } satisfies ContentAck;
       }
       if (input.type === "content.error") {
-        const request = validActiveSender(input, sender);
+        const request = await validActiveSender(input, sender);
         if (!request || !connected) {
           return { success: false, error: "Stale or disconnected error" };
         }
@@ -2541,6 +2717,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     // behind would have the next tab's first navigation judged against a dead predecessor —
     // deduplicated away, or refused as a stale document.
     navigationTracker.forgetTab(tabId);
+    releasedTabIds.delete(tabId);
     documentsByTab.delete(tabId);
     forgetHandledTab(tabId);
     failRequestsForTab(tabId, "The selected browser tab was closed");
@@ -2595,6 +2772,8 @@ const applyTabChange = async (
     await saveStored();
   };
   const dropTab = async (id: number, failure: string): Promise<void> => {
+    await releaseOwnedFavicon(id);
+    releasedTabIds.add(id);
     forgetHandledTab(id);
     clearSelectionFor(id);
     await dropDocument(id, failure);
@@ -2606,6 +2785,7 @@ const applyTabChange = async (
       registeredOrigin: genericRegistration.origin,
     });
     if (generic.leftOrigin) {
+      await releaseOwnedFavicon(tabId);
       removeGenericRegistration(tabId);
       failRequestsForTab(tabId, "The generic browser tab navigated to another origin");
       if (stored.selectedTabId === tabId) {
@@ -2639,7 +2819,9 @@ const applyTabChange = async (
     refreshProviderStatus();
     return;
   }
-  if (urlVerdict.verdict === "left-its-conversation" || urlVerdict.verdict === "document-replaced") {
+  if (urlVerdict.verdict === "left-its-conversation") {
+    await dropTab(tabId, urlVerdict.failure);
+  } else if (urlVerdict.verdict === "document-replaced") {
     // BB-A4-N04. Still the person's tab, and still a provider page: only the document it was
     // bound to has gone, so the tracking that lets the replacement be reinjected stays.
     await dropDocument(tabId, urlVerdict.failure);

@@ -26,6 +26,7 @@ const {
   createResponseBinder,
   createStreamSender,
   createSubmittedPromptWaiter,
+  chatGptRenderedPromptVariants,
   installProviderDocument,
   writeStagedAttachments,
   requestMatchesDocument,
@@ -56,6 +57,34 @@ test("rendered prompt canonicalization is narrow and deterministic", () => {
     "line 1\nline 2",
   );
   assert.equal(canonicalizeRenderedPrompt("a\n\n"), "a\n");
+});
+
+test("a collapsed ChatGPT prompt reconstructs every inline-code delimiter without UI text", () => {
+  const dom = createGenericDom(`
+    <article id="message">
+      <div data-testid="collapsible-user-message-content"><div>{"value":"before <code class="user-message-inline-code">0%</code> and <code class="user-message-inline-code">npm test</code> after"}</div></div>
+      <button>Show more</button><button>Show less</button>
+    </article>
+  `);
+  try {
+    const message = dom.query("#message");
+    Object.defineProperty(message, "innerText", {
+      configurable: true,
+      value: '{"value":"before 0% and npm test after"}Show moreShow less',
+    });
+    const content = message.querySelector("[data-testid='collapsible-user-message-content']");
+    Object.defineProperty(content, "innerText", {
+      configurable: true,
+      value: '{"value":"before 0% and npm test after"}',
+    });
+    assert.deepEqual(chatGptRenderedPromptVariants(message), [
+      '{"value":"before 0% and npm test after"}Show moreShow less',
+      '{"value":"before 0% and npm test after"}',
+      '{"value":"before `0%` and `npm test` after"}',
+    ]);
+  } finally {
+    dom.restore();
+  }
 });
 
 test("stream updates append when possible and replace after correction", () => {
@@ -3664,6 +3693,35 @@ test("the one permitted initial transition is announced and then used up", async
   );
 });
 
+test("a pending browser route confirmation leaves the transition available for retry", async () => {
+  let attempts = 0;
+  const { state, bind } = conversationBinder({
+    sendBackground: async (message) => {
+      state.sent.push(message);
+      attempts += 1;
+      return attempts === 1
+        ? { success: true, accepted: false }
+        : { success: true, accepted: true };
+    },
+  });
+  state.url = "https://chatgpt.com/c/new-one";
+  const request = activeRequest({
+    conversationUrl: "https://chatgpt.com/",
+    conversationIdentity: conversationIdentityFor("https://chatgpt.com/"),
+  });
+
+  await bind(request);
+  assert.equal(request.transitionUsed, false);
+  assert.equal(request.conversationUrl, "https://chatgpt.com/");
+  assert.equal(state.registered, 0);
+
+  await bind(request);
+  assert.equal(request.transitionUsed, true);
+  assert.equal(request.conversationUrl, "https://chatgpt.com/c/new-one");
+  assert.equal(state.registered, 1);
+  assert.equal(state.sent.length, 2);
+});
+
 test("a request that may not transition loses its binding when the page moves", async () => {
   for (const change of [
     { allowInitialConversationTransition: false },
@@ -3861,6 +3919,37 @@ test("the submitted prompt is matched by its rendered text, not by position", as
   assert.equal(binding.element, match);
   assert.equal(binding.providerMessageId, "user-1");
   assert.equal(binding.text, "hello");
+});
+
+test("the submitted-prompt waiter accepts a provider-owned rendered-text matcher", async () => {
+  const rendered = { innerText: "rendered without delimiters", messageId: "user-1" };
+  const { state, wait } = promptWaiter({
+    promptMatches: (element, expected) =>
+      element === rendered && expected === "before `inline` after",
+  });
+  state.messages = [rendered];
+  const binding = await wait(
+    activeRequest({ text: "before `inline` after" }),
+    new Set(),
+  );
+  assert.equal(binding.element, rendered);
+  assert.equal(binding.providerMessageId, "user-1");
+});
+
+test("a transient provider matcher fault does not turn a committed submission into failure", async () => {
+  const rendered = { innerText: "hello", messageId: "user-1" };
+  let attempts = 0;
+  const { state, wait } = promptWaiter({
+    promptMatches: () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("message was replaced while being read");
+      return true;
+    },
+  });
+  state.messages = [rendered];
+  const binding = await wait(activeRequest(), new Set());
+  assert.equal(binding.element, rendered);
+  assert.equal(attempts, 2);
 });
 
 test("a message the page already showed is not this turn's prompt", async () => {

@@ -1,6 +1,5 @@
 import {
   canonicalConversationUrl,
-  isSupportedInitialTransition,
   isSupportedInitialTransitionStart,
   providerForUrl,
 } from "./conversation.js";
@@ -62,19 +61,10 @@ export type ProviderTabUrlVerdict =
   | { verdict: "kept"; suppressRefresh: boolean };
 
 const pendingInitialTransitionMatches = (
-  binding: DocumentBinding | undefined,
   request: ActiveRequest | undefined,
 ): boolean =>
   Boolean(
-    binding &&
-      request &&
-      request.provider === binding.provider &&
-      request.tabId === binding.tabId &&
-      request.frameId === binding.frameId &&
-      request.documentId === binding.documentId &&
-      request.documentToken === binding.documentToken &&
-      request.conversationUrl === binding.conversationUrl &&
-      request.conversationIdentity === binding.conversationIdentity &&
+    request &&
       request.initialConversationUrl === request.conversationUrl &&
       request.allowInitialConversationTransition &&
       !request.transitionUsed &&
@@ -102,7 +92,7 @@ export const providerTabUrlVerdict = (input: {
 }): ProviderTabUrlVerdict => {
   const { url, status, binding, activeRequest, documentId } = input;
   if (typeof url !== "string") {
-    if (status === "complete" && pendingInitialTransitionMatches(binding, activeRequest)) {
+    if (status === "complete" && pendingInitialTransitionMatches(activeRequest)) {
       return { verdict: "kept", suppressRefresh: true };
     }
     return { verdict: "no-url-change" };
@@ -115,29 +105,8 @@ export const providerTabUrlVerdict = (input: {
     };
   }
   const nextUrl = canonicalConversationUrl(provider, url);
-  const permittedPendingTransition = Boolean(
-    pendingInitialTransitionMatches(binding, activeRequest) &&
-    (documentId === undefined ||
-      binding?.documentId === undefined ||
-      documentId === binding.documentId) &&
-    activeRequest &&
-      activeRequest.provider === provider &&
-      isSupportedInitialTransition(activeRequest.provider, activeRequest.conversationUrl, nextUrl),
-  );
   if (
     binding &&
-    (binding.provider !== provider || binding.conversationUrl !== nextUrl) &&
-    !permittedPendingTransition
-  ) {
-    return {
-      verdict: "left-its-conversation",
-      failure: "The selected browser tab navigated",
-      suppressRefresh: false,
-    };
-  }
-  if (
-    binding &&
-    !permittedPendingTransition &&
     documentId !== undefined &&
     binding.documentId !== undefined &&
     binding.documentId !== documentId
@@ -148,7 +117,23 @@ export const providerTabUrlVerdict = (input: {
       suppressRefresh: false,
     };
   }
-  return { verdict: "kept", suppressRefresh: permittedPendingTransition };
+  // tabs.onUpdated and webNavigation events can be delivered after a newer same-document route
+  // has already been accepted. While a request is active they are notifications, not identity
+  // authority: content messages are checked against tabs.get and the exact request binding.
+  if (activeRequest?.provider === provider) {
+    return { verdict: "kept", suppressRefresh: true };
+  }
+  if (
+    binding &&
+    (binding.provider !== provider || binding.conversationUrl !== nextUrl)
+  ) {
+    return {
+      verdict: "left-its-conversation",
+      failure: "The selected browser tab navigated",
+      suppressRefresh: false,
+    };
+  }
+  return { verdict: "kept", suppressRefresh: false };
 };
 
 /**

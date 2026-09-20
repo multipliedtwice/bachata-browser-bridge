@@ -17,6 +17,7 @@ type BachataChatGptAlert = {
 };
 
 type BachataChatGptLogic = BachataProviderLogic & {
+  chatGptRenderedPromptVariants: (element: HTMLElement) => string[];
   chatGptAlertCandidates: (sources: BachataChatGptAlertSources) => BachataChatGptAlertCandidate[];
   chatGptAlertElements: (sources: BachataChatGptAlertSources) => BachataChatGptAlertElement[];
   chatGptAlertSnapshot: (
@@ -58,6 +59,47 @@ const chatGptProviderLogic = createChatGptLogic({
   freshPathnames: ["/"],
   conversationPathPrefixes: ["/c/"],
 });
+
+const chatGptRenderedPromptVariants = (element: HTMLElement): string[] => {
+  const variants: string[] = [];
+  const remember = (value: string | null | undefined): void => {
+    if (typeof value === "string" && !variants.includes(value)) variants.push(value);
+  };
+  try {
+    remember(element.innerText);
+  } catch {
+    return variants;
+  }
+  let content: HTMLElement | null = null;
+  try {
+    content = element.querySelector<HTMLElement>(
+      "[data-testid='collapsible-user-message-content']",
+    );
+  } catch {
+    return variants;
+  }
+  const scope = content ?? element;
+  if (scope !== element) {
+    try {
+      remember(scope.innerText);
+    } catch {
+      return variants;
+    }
+  }
+  const reconstruct = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    const text = Array.from(node.childNodes).map(reconstruct).join("");
+    return node instanceof HTMLElement && node.matches("code.user-message-inline-code")
+      ? `\`${text}\``
+      : text;
+  };
+  try {
+    remember(reconstruct(scope));
+  } catch {
+    return variants;
+  }
+  return variants;
+};
 
 // ChatGPT-specific alert taxonomy. It stays here rather than in the shared provider logic
 // because the semantics and the anchors are ChatGPT's: Claude's alerts say different things in
@@ -353,6 +395,7 @@ const chatGptObservationFaultVerdict = (input: {
 
 bachataChatGptGlobal.__pairChatGptLogic = {
   ...chatGptProviderLogic,
+  chatGptRenderedPromptVariants,
   chatGptAlertCandidates,
   chatGptAlertElements,
   chatGptAlertSnapshot,
