@@ -264,6 +264,25 @@ test("a fully populated record round-trips every field", () => {
   assert.equal(Object.hasOwn(state, "unknownField"), false, "an unknown field was carried through");
 });
 
+test("stored conversation registries are normalized when present", () => {
+  const record = {
+    id: "12345678-1234-4234-8234-000000000001",
+    provider: "chatgpt",
+    conversationUrl: "https://chatgpt.com/c/chat-1",
+    conversationIdentity: "chatgpt:https://chatgpt.com/c/chat-1",
+    createdAt: 1000,
+    updatedAt: 1001,
+  };
+  assert.deepEqual(
+    storedStateFrom({ conversationRegistry: { version: 1, records: [record] } }).state.conversationRegistry,
+    { version: 1, records: [record] },
+  );
+  assert.deepEqual(
+    storedStateFrom({ conversationRegistry: { version: 2, records: [record] } }).state.conversationRegistry,
+    { version: 1, records: [] },
+  );
+});
+
 const documentBinding = (overrides = {}) => ({
   provider: "chatgpt",
   tabId: 7,
