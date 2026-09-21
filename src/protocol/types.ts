@@ -1,3 +1,6 @@
+import { isRecoveryId, type RecoverableConversation } from "./recovery.js";
+export type { RecoverableConversation } from "./recovery.js";
+
 export const protocolVersion = 9 as const;
 
 export type BrowserProvider = "chatgpt" | "claude" | "generic";
@@ -94,6 +97,8 @@ export type ConversationBinding = {
 };
 
 export type ServerMessage =
+  | { type: "provider.listRecoverableConversations"; protocolVersion: 9; requestId: string }
+  | { type: "provider.reopenConversation"; protocolVersion: 9; requestId: string; provider: "chatgpt" | "claude"; registryId: string }
   | {
       type: "bridge.paired";
       protocolVersion: 9;
@@ -157,6 +162,15 @@ export type ServerMessage =
     };
 
 export type ClientMessage =
+  | { type: "provider.listRecoverableConversations.result"; protocolVersion: 9; requestId: string; records: RecoverableConversation[] }
+  | {
+      type: "conversation.binding";
+      protocolVersion: 9;
+      requestId: string;
+      agentId: string;
+      sessionId: string;
+      session: BrowserSession;
+    }
   | { type: "bridge.pair"; protocolVersion: 9; token: string }
   | {
       type: "bridge.authenticate";
@@ -401,6 +415,17 @@ export const parseServerMessage = (value: unknown): ServerMessage => {
     return value as ServerMessage;
   }
 
+  if (value.type === "provider.listRecoverableConversations") {
+    if (!hasOnlyKeys(value, ["type", "protocolVersion", "requestId"])
+      || !isNonEmptyString(value.requestId) || value.requestId.length > 256) throw new Error("Invalid provider.listRecoverableConversations message");
+    return value as ServerMessage;
+  }
+  if (value.type === "provider.reopenConversation") {
+    if (!hasOnlyKeys(value, ["type", "protocolVersion", "requestId", "provider", "registryId"])
+      || !isNonEmptyString(value.requestId) || value.requestId.length > 256
+      || (value.provider !== "chatgpt" && value.provider !== "claude") || !isRecoveryId(value.registryId)) throw new Error("Invalid provider.reopenConversation message");
+    return value as ServerMessage;
+  }
   if (value.type === "provider.openConversation") {
     if (
       !hasOnlyKeys(value, [

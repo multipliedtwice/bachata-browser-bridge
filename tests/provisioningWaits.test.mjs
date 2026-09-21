@@ -477,7 +477,7 @@ test("a wait with no clock supplied reads the real one", async () => {
 const previous = "chatgpt:https://chatgpt.com/c/previous";
 
 test("a fresh, generic or unnamed open never reopens a previous conversation", () => {
-  const sessions = [session({ provider: "chatgpt", conversationIdentity: previous })];
+  const sessions = [session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous })];
   assert.deepEqual(
     reopenConversationPlan({ provider: "chatgpt", fresh: true, preferredConversationIdentity: previous, sessions }),
     { kind: "none" },
@@ -499,20 +499,22 @@ test("an identity that is not a real conversation of the provider is not reopene
   ]) {
     assert.deepEqual(
       reopenConversationPlan({ provider, fresh: false, preferredConversationIdentity: identity, sessions: [] }),
-      { kind: "none" },
+      identity === "chatgpt:https://chatgpt.com/" || identity === "claude:https://claude.ai/new"
+        ? { kind: "none" }
+        : { kind: "refuse", refusal: { code: "OPEN_CONVERSATION_FAILED", message: "The saved provider conversation identity is invalid" } },
       identity,
     );
   }
 });
 
 test("a previous conversation already ready in a tab is reused instead of opened again", () => {
-  const ready = session({ id: "ready", provider: "chatgpt", conversationIdentity: previous, status: "ready" });
+  const ready = session({ id: "ready", provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous, status: "ready" });
   assert.deepEqual(
     reopenConversationPlan({
       provider: "chatgpt",
       fresh: false,
       preferredConversationIdentity: previous,
-      sessions: [session({ provider: "chatgpt", conversationIdentity: previous, status: "streaming" }), ready],
+      sessions: [session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous, status: "streaming" }), ready],
     }),
     { kind: "reuse", session: ready },
   );
@@ -524,8 +526,8 @@ test("a previous conversation open but not ready is refused rather than opened t
     fresh: false,
     preferredConversationIdentity: previous,
     sessions: [
-      session({ provider: "claude", conversationIdentity: previous, status: "ready" }),
-      session({ provider: "chatgpt", conversationIdentity: previous, status: "streaming" }),
+      session({ provider: "claude", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous, status: "ready" }),
+      session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous, status: "streaming" }),
     ],
   });
   assert.equal(plan.kind, "refuse");
@@ -542,11 +544,11 @@ test("a previous conversation with no open tab is navigated to by its own URL", 
 
 test("a reopened tab must come back ready on the conversation it was sent to", () => {
   assert.equal(
-    reopenedSessionRefusal({ session: session({ conversationIdentity: previous }), conversationIdentity: previous }),
+    reopenedSessionRefusal({ session: session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous }), conversationIdentity: previous }),
     undefined,
   );
   assert.equal(
-    reopenedSessionRefusal({ session: session({ conversationIdentity: previous, status: "notAuthenticated" }), conversationIdentity: previous })?.code,
+    reopenedSessionRefusal({ session: session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous, status: "notAuthenticated" }), conversationIdentity: previous })?.code,
     "AUTHENTICATION_REQUIRED",
   );
   const moved = reopenedSessionRefusal({ session: session({ conversationIdentity: "chatgpt:https://chatgpt.com/" }), conversationIdentity: previous });
@@ -558,7 +560,7 @@ test("a reopen plan reads sessions only when a previous conversation is named", 
   let reads = 0;
   const readSessions = async () => {
     reads += 1;
-    return [session({ provider: "chatgpt", conversationIdentity: previous })];
+    return [session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous })];
   };
   assert.deepEqual(
     await planConversationReopen({ provider: "chatgpt", fresh: true, preferredConversationIdentity: previous, readSessions, signal: openSignal }),
@@ -593,8 +595,18 @@ test("only a reuse or a refusal short-circuits provisioning", () => {
 test("a navigated tab is judged by the conversation it was sent to, any other by readiness", () => {
   const elsewhere = session({ provider: "chatgpt", conversationIdentity: "chatgpt:https://chatgpt.com/c/other" });
   assert.equal(
-    provisionedSessionRefusal({ session: elsewhere, plan: { kind: "navigate", url: "https://chatgpt.com/c/x", conversationIdentity: previous } })?.code,
+    provisionedSessionRefusal({ session: elsewhere, plan: { kind: "navigate", url: "https://chatgpt.com/c/x", conversationUrl: "https://chatgpt.com/c/previous", conversationIdentity: previous } })?.code,
     "OPEN_CONVERSATION_FAILED",
   );
   assert.equal(provisionedSessionRefusal({ session: elsewhere, plan: { kind: "none" } }), undefined);
+});
+
+test("reopening refuses unsafe, noncanonical, wrong-provider and incomplete stable URLs", () => {
+  for (const url of ["https://chatgpt.com/c/", "https://chatgpt.com/c/a/", "https://chatgpt.com/c/a?x=1", "https://chatgpt.com:443/c/a", "https://secret@chatgpt.com/c/a", "https://chatgpt.com/c/%61", "https://claude.ai/chat/a", "https://chatgpt.com/settings"]) {
+    assert.equal(reopenConversationPlan({ provider: "chatgpt", fresh: false, preferredConversationIdentity: `chatgpt:${url}`, sessions: [] }).kind, "refuse", url);
+  }
+  const identity = "chatgpt:https://chatgpt.com/c/exact";
+  for (const mismatch of [session({ provider: "claude", conversationUrl: "https://chatgpt.com/c/exact", conversationIdentity: identity }), session({ provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/other", conversationIdentity: identity })]) {
+    assert.equal(reopenedSessionRefusal({ session: mismatch, conversationIdentity: identity }).code, "OPEN_CONVERSATION_FAILED");
+  }
 });

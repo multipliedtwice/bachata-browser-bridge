@@ -392,3 +392,14 @@ test("every contract response fixture carries only advancing, non-empty segments
     assert.equal(cursor, response.text.length, `${response.type} segments do not cover its text`);
   }
 });
+
+
+test("recovery requests require an explicit bounded registry ID and a built-in provider", () => {
+  const registryId = "12345678-1234-4234-8234-123456789abc";
+  const valid = { type: "provider.reopenConversation", protocolVersion, requestId: "recover", registryId, provider: "chatgpt" };
+  assert.deepEqual(parseServerMessage(valid), valid);
+  for (const patch of [{ registryId: undefined }, { registryId: "latest" }, { registryId: "a".repeat(3000) }, { provider: "generic" }, { conversationUrl: "https://chatgpt.com/c/a" }, { requestId: "a".repeat(257) }]) {
+    assert.throws(() => parseServerMessage({ ...valid, ...patch }), /Invalid provider.reopenConversation/u);
+  }
+  assert.throws(() => parseServerMessage({ type: "provider.listRecoverableConversations", protocolVersion, requestId: "list", latest: true }), /Invalid provider.listRecoverableConversations/u);
+});

@@ -22,6 +22,7 @@ declare namespace chrome {
 
   namespace tabs {
     type Tab = {
+      active?: boolean;
       id?: number;
       windowId?: number;
       title?: string;

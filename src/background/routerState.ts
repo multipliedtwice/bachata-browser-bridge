@@ -1,3 +1,4 @@
+import { normalizeConversationRegistry, type ConversationRegistry } from "./conversationRegistry.js";
 import type {
   BrowserProvider,
   BrowserSession,
@@ -33,6 +34,7 @@ export type ActiveRequest = ConversationBinding & {
 };
 
 export type StoredState = {
+  conversationRegistry?: ConversationRegistry;
   endpoint?: string | undefined;
   connectionToken?: string | undefined;
   selectedTabId?: number | undefined;
@@ -118,6 +120,7 @@ export const storedStateFrom = (
   const reconnect = sanitizeReconnectMetadata(candidate, connectionToken);
   return {
     state: {
+      ...(candidate.conversationRegistry === undefined ? {} : { conversationRegistry: normalizeConversationRegistry(candidate.conversationRegistry) }),
       ...(endpoint ? { endpoint } : {}),
       ...(connectionToken ? { connectionToken } : {}),
       ...(selectedTabId ? { selectedTabId } : {}),

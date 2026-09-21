@@ -6,6 +6,7 @@
  * one body, so the judgement could only be reached by driving a whole conversation open.
  * The Chrome calls stay in the service-worker entry; what their answers mean is decided here.
  */
+import { isStableRecoveryIdentity } from "../protocol/recovery.js";
 import type { BrowserProvider, BrowserSession } from "../protocol/types.js";
 import { isSupportedInitialTransitionStart, providerForUrl } from "./conversation.js";
 import { abortableDelay, throwIfAborted } from "./cancellation.js";
@@ -318,15 +319,15 @@ export const reopenConversationPlan = (input: {
   sessions: readonly BrowserSession[];
 }): ReopenConversationPlan => {
   const identity = input.preferredConversationIdentity;
-  if (input.fresh || input.provider === "generic" || !identity?.startsWith(`${input.provider}:`)) {
-    return { kind: "none" };
-  }
+  if (input.fresh || input.provider === "generic" || identity === undefined) return { kind: "none" };
   const url = identity.slice(input.provider.length + 1);
-  if (providerForUrl(url) !== input.provider || isSupportedInitialTransitionStart(input.provider, url)) {
-    return { kind: "none" };
+  if (identity === `${input.provider}:${url}` && (url === "https://chatgpt.com/" || url === "https://claude.ai/" || url === "https://claude.ai/new")
+    && providerForUrl(url) === input.provider && isSupportedInitialTransitionStart(input.provider, url)) return { kind: "none" };
+  if (!isStableRecoveryIdentity(input.provider, url, identity)) {
+    return { kind: "refuse", refusal: { code: "OPEN_CONVERSATION_FAILED", message: "The saved provider conversation identity is invalid" } };
   }
   const open = input.sessions.filter(
-    (session) => session.provider === input.provider && session.conversationIdentity === identity,
+    (session) => session.provider === input.provider && session.conversationIdentity === identity && session.conversationUrl === url && session.frameId === 0,
   );
   const ready = open.find((session) => session.status === "ready");
   if (ready) return { kind: "reuse", session: ready };
@@ -349,6 +350,8 @@ export const reopenedSessionRefusal = (input: {
 }): ProvisioningRefusal | undefined =>
   openedSessionRefusal({ session: input.session, recycled: false })
   ?? (input.session.conversationIdentity === input.conversationIdentity
+    && input.session.frameId === 0
+    && isStableRecoveryIdentity(input.session.provider, input.session.conversationUrl, input.conversationIdentity)
     ? undefined
     : {
         code: "OPEN_CONVERSATION_FAILED",

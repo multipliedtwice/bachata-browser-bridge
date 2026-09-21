@@ -4374,6 +4374,8 @@ const registeredDocumentHarness = async (label, options = {}) => {
   const sockets = [];
   const timers = new Map();
   let nextTimerId = 1;
+  let storageState = structuredClone(options.stored ?? {});
+  let storageWriteHandler = async () => undefined;
   const providerUrl = options.providerUrl ?? "https://chatgpt.com/c/registered";
   const documentToken = "registered-document-token";
   let providerTabs = options.providerTabs ?? [{ id: 31, url: providerUrl, title: "registered" }];
@@ -4446,12 +4448,13 @@ const registeredDocumentHarness = async (label, options = {}) => {
   // fixed reply. The built-in providers keep the reply they had.
   let tabMessageHandler = defaultTabMessageHandler;
 
+  const createProviderTab = options.createProviderTab === true;
   const chrome = {
     ...backgroundChromeSupport(),
     alarms: { create: async () => undefined, clear: async () => true, onAlarm: alarmEvent },
     runtime: { id: "bachata-bridge-test", onMessage: runtimeEvent },
     storage: {
-      local: { get: async () => ({}), set: async () => undefined, remove: async () => undefined },
+      local: { get: async () => structuredClone(storageState), set: async (value) => { await storageWriteHandler(value); storageState = { ...storageState, ...structuredClone(value) }; }, remove: async () => undefined },
       session: { get: async () => ({}), set: async () => undefined, remove: async () => undefined },
     },
     permissions: { contains: async () => true },
@@ -4465,6 +4468,10 @@ const registeredDocumentHarness = async (label, options = {}) => {
       create: async (options) => {
         tabCalls.push({ call: "create", options });
         if (tabCreateGate) await tabCreateGate;
+        if (createProviderTab) {
+          providerTabs = [{ id: 31, url: options.url, title: "opened", status: "complete", active: false }];
+          return providerTabs[0];
+        }
         return { id: 512, url: options?.url, title: "opened" };
       },
       update: async (tabId, options) => {
@@ -4618,7 +4625,7 @@ const registeredDocumentHarness = async (label, options = {}) => {
       endpoint: "ws://127.0.0.1:43123/bachata-browser-bridge-v9",
       token: "pairing-token",
     });
-    const socket = sockets[0];
+    const socket = sockets.at(-1);
     socket.readyState = FakeWebSocket.OPEN;
     socket.emit("open");
     socket.emit("message", {
@@ -4645,6 +4652,8 @@ const registeredDocumentHarness = async (label, options = {}) => {
   };
 
   return {
+    storedState: () => structuredClone(storageState),
+    setStorageWriteHandler: (handler) => { storageWriteHandler = handler; },
     selectAndReadSession,
     replacedEvent,
     chrome,
@@ -4735,6 +4744,184 @@ test("concurrent discovery and selection inject one provider document", async ()
     releaseInjection();
     harness.restore();
   }
+});
+
+const recoveryFrame = (socket, message) => socket.emit("message", { data: JSON.stringify({ protocolVersion: 9, ...message }) });
+const drainRecovery = async () => { for (let index = 0; index < 24; index += 1) await nextTurn(); };
+
+const startCreatedRecoveryTurn = async (harness, socket, created = true) => {
+  if (created) {
+    recoveryFrame(socket, { type: "provider.openConversation", requestId: "create-recovery", provider: "chatgpt", fresh: true });
+    await drainRecovery();
+    const opened = socket.sent.find((frame) => frame.type === "provider.openConversation.result" && frame.requestId === "create-recovery");
+    assert.equal(opened?.success, true, JSON.stringify(opened));
+  }
+  const selected = await harness.selectAndReadSession();
+  recoveryFrame(socket, { type: "conversation.send", requestId: "recovery-turn", agentId: "agent-1", provider: "chatgpt",
+    sessionId: selected.sessionId, tabId: 31, frameId: 0, documentId: harness.contentSender.documentId,
+    documentToken: harness.documentToken, conversationUrl: harness.providerUrl, conversationIdentity: `chatgpt:${harness.providerUrl}`,
+    text: "private prompt", attachments: [], allowInitialConversationTransition: true });
+  await drainRecovery();
+  assert.ok(socket.sent.some((frame) => frame.type === "conversation.submitted"));
+  return selected;
+};
+
+const promoteRecoveryTurn = (harness, selected, overrides = {}) => {
+  const url = "https://chatgpt.com/c/durable-created";
+  harness.setProviderFrameUrl(url);
+  harness.setProviderTabs([{ id: 31, url, title: "private title", status: "complete", active: false }]);
+  return harness.fromContent({ type: "content.transition", submissionCommitted: true, requestId: "recovery-turn", agentId: "agent-1",
+    sessionId: selected.sessionId, documentToken: harness.documentToken, previousConversationUrl: harness.providerUrl,
+    conversationUrl: url, conversationIdentity: `chatgpt:${url}`, ...overrides });
+};
+
+test("created chat persists before its binding event and final response, survives close and restart, then explicitly reopens inactive", async () => {
+  const harness = await registeredDocumentHarness("durable-create", { providerUrl: "https://chatgpt.com/", providerTabs: [], createProviderTab: true });
+  let saved;
+  let record;
+  try {
+    const socket = await harness.pair();
+    const selected = await startCreatedRecoveryTurn(harness, socket);
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    harness.setStorageWriteHandler(async (value) => {
+      if (value["bachataBridgeState.v8"]?.conversationRegistry?.records.length) await held;
+    });
+    const promotion = promoteRecoveryTurn(harness, selected);
+    await drainRecovery();
+    assert.equal(socket.sent.some((frame) => frame.type === "conversation.binding"), false);
+    recoveryFrame(socket, { type: "provider.listRecoverableConversations", requestId: "list-before-storage" });
+    await drainRecovery();
+    assert.deepEqual(socket.sent.find((frame) => frame.requestId === "list-before-storage").records, []);
+    release();
+    assert.deepEqual(await promotion, { success: true, accepted: true });
+    const records = harness.storedState()["bachataBridgeState.v8"].conversationRegistry.records;
+    assert.equal(records.length, 1);
+    record = records[0];
+    assert.equal(record.conversationUrl, "https://chatgpt.com/c/durable-created");
+    assert.equal(socket.sent.some((frame) => frame.type === "conversation.response"), false);
+    const bindingEvent = socket.sent.find((frame) => frame.type === "conversation.binding");
+    assert.equal(bindingEvent.session.conversationIdentity, record.conversationIdentity);
+    assert.equal(JSON.stringify(records).includes("private"), false);
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "recover-active", provider: "chatgpt", registryId: record.id });
+    await drainRecovery();
+    const activeRefusal = socket.sent.find((frame) => frame.requestId === "recover-active");
+    assert.equal(activeRefusal.success, false);
+    assert.equal(activeRefusal.code, "PROVIDER_NOT_READY");
+    assert.equal(harness.tabCalls.filter((entry) => entry.call === "create").length, 1);
+    harness.setProviderTabs([]);
+    harness.removedEvent.listeners.forEach((listener) => listener(31));
+    await drainRecovery();
+    saved = harness.storedState();
+    assert.deepEqual(saved["bachataBridgeState.v8"].conversationRegistry.records, records);
+    assert.equal(saved["bachataBridgeState.v8"].selectedTabId, undefined);
+    assert.equal(saved["bachataBridgeState.v8"].selectedSessionId, undefined);
+    assert.equal(saved["bachataBridgeState.v8"].handledTabIds?.includes(31) ?? false, false);
+    recoveryFrame(socket, { type: "provider.listRecoverableConversations", requestId: "list-closed" });
+    await drainRecovery();
+    assert.deepEqual(socket.sent.find((frame) => frame.requestId === "list-closed").records, records);
+  } finally { harness.restore(); }
+  const restarted = await registeredDocumentHarness("durable-restart", { stored: saved, providerTabs: [], providerUrl: record.conversationUrl, createProviderTab: true });
+  try {
+    const socket = await restarted.pair();
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "reopen-record", provider: "chatgpt", registryId: record.id });
+    await drainRecovery();
+    const result = socket.sent.find((frame) => frame.requestId === "reopen-record");
+    assert.equal(result?.success, true, JSON.stringify(result));
+    assert.equal(result.session.conversationIdentity, record.conversationIdentity);
+    assert.deepEqual(restarted.tabCalls.find((call) => call.call === "create").options, { url: record.conversationUrl, active: false });
+    assert.ok(restarted.injections.includes(31));
+    assert.equal(restarted.tabMessages.some((entry) => entry.message?.type === "conversation.send"), false);
+    assert.equal(restarted.storedState()["bachataBridgeState.v8"].conversationRegistry.records.length, 1);
+  } finally { restarted.restore(); }
+});
+
+test("selected and discovered initial tabs publish early binding but never enter the created registry", async () => {
+  const harness = await registeredDocumentHarness("recovery-discovered", { providerUrl: "https://chatgpt.com/" });
+  try {
+    const socket = await harness.pair();
+    const selected = await startCreatedRecoveryTurn(harness, socket, false);
+    assert.deepEqual(await promoteRecoveryTurn(harness, selected), { success: true, accepted: true });
+    assert.equal(harness.storedState()["bachataBridgeState.v8"].conversationRegistry, undefined);
+    assert.ok(socket.sent.some((frame) => frame.type === "conversation.binding"));
+  } finally { harness.restore(); }
+});
+
+test("uncommitted and wrong-document transitions and closed provisional tabs are not recoverable", async () => {
+  const harness = await registeredDocumentHarness("recovery-refusals", { providerUrl: "https://chatgpt.com/", providerTabs: [], createProviderTab: true });
+  try {
+    const socket = await harness.pair();
+    const selected = await startCreatedRecoveryTurn(harness, socket);
+    assert.equal((await promoteRecoveryTurn(harness, selected, { submissionCommitted: false })).accepted, false);
+    assert.equal((await promoteRecoveryTurn(harness, selected, { documentToken: "other" })).accepted, false);
+    assert.equal(harness.storedState()["bachataBridgeState.v8"].conversationRegistry, undefined);
+    assert.equal(socket.sent.some((frame) => frame.type === "conversation.binding"), false);
+    harness.setProviderTabs([]);
+    harness.removedEvent.listeners.forEach((listener) => listener(31));
+    await drainRecovery();
+    recoveryFrame(socket, { type: "provider.listRecoverableConversations", requestId: "empty-registry" });
+    await drainRecovery();
+    assert.deepEqual(socket.sent.find((frame) => frame.requestId === "empty-registry").records, []);
+  } finally { harness.restore(); }
+});
+
+test("registry reopen rejects unknown IDs, wrong providers and request ID selection changes without provisioning", async () => {
+  const registryId = "12345678-1234-4234-8234-123456789abc";
+  const record = { id: registryId, provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/saved", conversationIdentity: "chatgpt:https://chatgpt.com/c/saved", createdAt: 1000, updatedAt: 1000 };
+  const harness = await registeredDocumentHarness("recovery-exact-id", { stored: { "bachataBridgeState.v8": { conversationRegistry: { version: 1, records: [record] } } } });
+  try {
+    const socket = await harness.pair();
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "wrong-provider", provider: "claude", registryId });
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "missing-record", provider: "chatgpt", registryId: "12345678-1234-4234-8234-000000000001" });
+    await drainRecovery();
+    assert.equal(socket.sent.find((frame) => frame.requestId === "wrong-provider")?.success, false);
+    assert.equal(socket.sent.find((frame) => frame.requestId === "missing-record")?.success, false);
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "wrong-provider", provider: "chatgpt", registryId });
+    await drainRecovery();
+    assert.equal(socket.sent.filter((frame) => frame.requestId === "wrong-provider").at(-1).message, "The provisioning request identity changed");
+    assert.equal(harness.tabCalls.some((call) => call.call === "create"), false);
+  } finally { harness.restore(); }
+});
+
+for (const status of ["notAuthenticated", "failed"]) {
+  test(`registry recovery fails closed when the reopened provider is ${status}`, async () => {
+    const record = { id: "12345678-1234-4234-8234-123456789abc", provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/saved", conversationIdentity: "chatgpt:https://chatgpt.com/c/saved", createdAt: 1000, updatedAt: 1000 };
+    const harness = await registeredDocumentHarness(`recovery-${status}`, { providerTabs: [], providerUrl: record.conversationUrl, createProviderTab: true,
+      stored: { "bachataBridgeState.v8": { conversationRegistry: { version: 1, records: [record] } } } });
+    try {
+      const socket = await harness.pair();
+      harness.setTabMessageHandler(async () => ({ status, documentToken: harness.documentToken, conversationUrl: record.conversationUrl, conversationIdentity: record.conversationIdentity }));
+      recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "recovery-not-ready", provider: "chatgpt", registryId: record.id });
+      await drainRecovery();
+      const result = socket.sent.find((frame) => frame.requestId === "recovery-not-ready");
+      assert.equal(result?.success, false, JSON.stringify(result));
+      assert.equal(result.code, status === "notAuthenticated" ? "AUTHENTICATION_REQUIRED" : "PROVIDER_NOT_READY");
+      assert.ok(harness.tabCalls.some((call) => call.call === "remove"));
+      assert.equal(harness.tabMessages.some((entry) => entry.message.type === "conversation.send"), false);
+    } finally { harness.restore(); }
+  });
+}
+
+test("registry recovery rejects a provider redirect to another stable conversation", async () => {
+  const record = { id: "12345678-1234-4234-8234-123456789abc", provider: "chatgpt", conversationUrl: "https://chatgpt.com/c/saved", conversationIdentity: "chatgpt:https://chatgpt.com/c/saved", createdAt: 1000, updatedAt: 1000 };
+  const redirected = "https://chatgpt.com/c/another";
+  const harness = await registeredDocumentHarness("recovery-redirect", { providerTabs: [], providerUrl: redirected,
+    stored: { "bachataBridgeState.v8": { conversationRegistry: { version: 1, records: [record] } } } });
+  try {
+    const socket = await harness.pair();
+    harness.chrome.tabs.create = async () => {
+      const tab = { id: 31, url: redirected, active: false, status: "complete" };
+      harness.setProviderTabs([tab]);
+      return tab;
+    };
+    recoveryFrame(socket, { type: "provider.reopenConversation", requestId: "recovery-redirect", provider: "chatgpt", registryId: record.id });
+    await drainRecovery();
+    const result = socket.sent.find((frame) => frame.requestId === "recovery-redirect");
+    assert.equal(result?.success, false, JSON.stringify(result));
+    assert.equal(result.code, "OPEN_CONVERSATION_FAILED");
+    assert.ok(harness.tabCalls.some((call) => call.call === "remove"));
+    assert.equal(harness.tabMessages.some((entry) => entry.message.type === "conversation.send"), false);
+  } finally { harness.restore(); }
 });
 
 // BB-AUD-09. Everything that must already be true before one asset frame means anything: a

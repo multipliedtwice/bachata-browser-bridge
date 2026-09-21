@@ -31,7 +31,9 @@
     "asset.chunk",
     "asset.complete",
     "asset.error",
-    "asset.reveal.result"
+    "asset.reveal.result",
+    "provider.listRecoverableConversations.result",
+    "conversation.binding"
   ],
   "serverMessageTypes": [
     "bridge.paired",
@@ -46,7 +48,9 @@
     "conversation.interrupt",
     "asset.fetch",
     "asset.cancel",
-    "asset.reveal"
+    "asset.reveal",
+    "provider.listRecoverableConversations",
+    "provider.reopenConversation"
   ],
   "captureFormats": [
     "renderedText"
@@ -263,6 +267,40 @@
       "requestId": "reveal-1",
       "assetId": "asset-1",
       "success": true
+    },
+    {
+      "type": "provider.listRecoverableConversations.result",
+      "protocolVersion": 9,
+      "requestId": "list-recovery",
+      "records": [
+        {
+          "id": "12345678-1234-4234-8234-123456789abc",
+          "provider": "chatgpt",
+          "conversationUrl": "https://chatgpt.com/c/recovered",
+          "conversationIdentity": "chatgpt:https://chatgpt.com/c/recovered",
+          "createdAt": 1700000000000,
+          "updatedAt": 1700000000001
+        }
+      ]
+    },
+    {
+      "type": "conversation.binding",
+      "protocolVersion": 9,
+      "requestId": "initial-turn",
+      "agentId": "chatgpt",
+      "sessionId": "initial-session",
+      "session": {
+        "id": "chatgpt:31:document-token:chatgpt%3Ahttps%3A%2F%2Fchatgpt.com%2Fc%2Frecovered",
+        "provider": "chatgpt",
+        "tabId": 31,
+        "frameId": 0,
+        "documentToken": "document-token",
+        "conversationUrl": "https://chatgpt.com/c/recovered",
+        "conversationIdentity": "chatgpt:https://chatgpt.com/c/recovered",
+        "status": "streaming",
+        "createdAt": "2026-09-21T00:00:00.000Z",
+        "updatedAt": "2026-09-21T00:00:00.000Z"
+      }
     }
   ],
   "serverCompatibilityFixtures": [
@@ -367,6 +405,18 @@
       "protocolVersion": 9,
       "requestId": "reveal-1",
       "assetId": "asset-1"
+    },
+    {
+      "type": "provider.listRecoverableConversations",
+      "protocolVersion": 9,
+      "requestId": "list-recovery"
+    },
+    {
+      "type": "provider.reopenConversation",
+      "protocolVersion": 9,
+      "requestId": "reopen-recovery",
+      "provider": "chatgpt",
+      "registryId": "12345678-1234-4234-8234-123456789abc"
     }
   ]
 }

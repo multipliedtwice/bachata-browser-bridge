@@ -1,3 +1,5 @@
+import { bindProvisionalCreation, maximumProvisionalCreations, normalizeConversationRegistry, promoteCreatedConversation, provisionalCreationLifetimeMs, type ProvisionalCreation } from "./conversationRegistry.js";
+import { isStableRecoveryIdentity } from "../protocol/recovery.js";
 import { bindCurrentGenericTab, ensureGenericContentScript, genericRegistrations, genericStatus, handleGenericContentMessage, handleGenericContextMenu, handleGenericProfileStorageMessage, isGenericTab, registerGenericContextMenus, removeGenericRegistration, restoreGenericRegistrations, sendGenericCommand, storedGenericProfileOrigins } from "./genericProvider.js";
 import { handleLocalModelPromptMessage, setLocalModelConfig } from "./localModelProxy.js";
 import { handleQuarantineMessage } from "./quarantine.js";
@@ -142,6 +144,7 @@ type ContentAck = {
 };
 
 type ProvisioningInput = {
+  registryId?: string;
   provider: BrowserProvider;
   eventSocket: WebSocket;
   preferredTabId?: number;
@@ -174,6 +177,7 @@ const providerStatuses = new Set<BrowserSession["status"]>([
 ]);
 
 let stored: StoredState = {};
+let recoverableRegistry = normalizeConversationRegistry(undefined);
 let socket: WebSocket | undefined;
 let connected = false;
 let connecting = false;
@@ -186,6 +190,7 @@ let pairingToken: string | undefined;
 let reconnectAttempt = 0;
 let retryInMs: number | undefined;
 const documentsByTab = new Map<number, DocumentBinding>();
+const provisionalCreations = new Map<number, ProvisionalCreation>();
 const releasedTabIds = new Set<number>();
 const sessionCreatedAt = new Map<string, string>();
 const activeRequests = new Map<string, ActiveRequest>();
@@ -223,6 +228,7 @@ const loadStored = async (): Promise<void> => {
   );
   const normalized = storedStateFrom(candidate);
   stored = normalized.state;
+  recoverableRegistry = normalizeConversationRegistry(stored.conversationRegistry);
   if (normalized.invalidEndpoint) {
     error = "The saved bridge endpoint was invalid and has been cleared";
   }
@@ -630,6 +636,7 @@ const discoverProviderTabs = async (): Promise<void> => {
 };
 
 const closeCreatedTab = async (tabId: number): Promise<void> => {
+  provisionalCreations.delete(tabId);
   forgetHandledTab(tabId);
   await Promise.allSettled([chrome.tabs.remove(tabId), saveStored()]);
 };
@@ -638,7 +645,13 @@ const provisionProviderConversation = async (
   input: ProvisioningInput,
   signal: AbortSignal,
 ): Promise<ProvisioningResult> => {
-  const { provider, preferredTabId, preferredOrigin, preferredConversationIdentity, fresh = false } = input;
+  const { provider, preferredTabId, preferredOrigin, fresh = false } = input;
+  let preferredConversationIdentity = input.preferredConversationIdentity;
+  if (input.registryId !== undefined) {
+    const record = recoverableRegistry.records.find((entry) => entry.id === input.registryId && entry.provider === provider);
+    if (!record || fresh) return { provider, success: false, code: "RECOVERY_NOT_FOUND", message: "The selected recoverable conversation is unavailable" };
+    preferredConversationIdentity = record.conversationIdentity;
+  }
   let createdTabId: number | undefined;
   try {
     throwIfAborted(signal);
@@ -691,7 +704,19 @@ const provisionProviderConversation = async (
       await selectOwnedSession(verdict.session);
       return { provider, success: true, session: verdict.session };
     }
-    const reopen = await planConversationReopen({ provider, fresh, preferredConversationIdentity, readSessions: buildSessions, signal });
+    if (!fresh && preferredConversationIdentity !== undefined
+      && [...activeRequests.values()].some((request) => request.provider === provider && request.conversationIdentity === preferredConversationIdentity)) {
+      return { provider, success: false, code: "PROVIDER_NOT_READY", message: "The selected conversation has an active request" };
+    }
+    const reopen = await planConversationReopen({ provider, fresh, preferredConversationIdentity, readSessions: async () => {
+      const sessions = await buildSessions();
+      if (input.registryId === undefined) return sessions;
+      const inactive = await Promise.all(sessions.map(async (session) => {
+        const tab = await chrome.tabs.get(session.tabId).catch(() => undefined);
+        return tab?.active === false || session.status !== "ready" ? session : undefined;
+      }));
+      return inactive.filter((session): session is BrowserSession => session !== undefined);
+    }, signal });
     const shortcut = reopenShortcut(reopen);
     if (shortcut) {
       if (shortcut.success && shortcut.session) {
@@ -748,6 +773,18 @@ const provisionProviderConversation = async (
       throw new Error("Chrome did not return a tab identifier");
     }
     createdTabId = tab.id as number;
+    if (reopen.kind === "none") {
+      const now = Date.now();
+      for (const [tabId, marker] of provisionalCreations) {
+        if (now - marker.createdAt > provisionalCreationLifetimeMs) provisionalCreations.delete(tabId);
+      }
+      while (provisionalCreations.size >= maximumProvisionalCreations) {
+        const oldest = provisionalCreations.keys().next().value;
+        if (oldest === undefined) break;
+        provisionalCreations.delete(oldest);
+      }
+      provisionalCreations.set(createdTabId, { id: crypto.randomUUID(), provider, tabId: createdTabId, createdAt: now });
+    }
     rememberHandledTabs([createdTabId]);
     await saveStored();
     await awaitLoadedProviderTab({
@@ -767,6 +804,10 @@ const provisionProviderConversation = async (
     });
     throwIfAborted(signal);
     await sendProviderStatus();
+    const marker = provisionalCreations.get(createdTabId);
+    const boundMarker = marker ? bindProvisionalCreation(marker, session) : undefined;
+    if (boundMarker) provisionalCreations.set(createdTabId, boundMarker);
+    else provisionalCreations.delete(createdTabId);
     const openedRefusal = provisionedSessionRefusal({ session, plan: reopen });
     if (openedRefusal) {
       if (reopen.kind === "navigate") await closeCreatedTab(createdTabId);
@@ -775,6 +816,7 @@ const provisionProviderConversation = async (
     await selectOwnedSession(session);
     return { provider, success: true, session };
   } catch (cause) {
+    if (createdTabId !== undefined) provisionalCreations.delete(createdTabId);
     if (signal.aborted) {
       if (createdTabId !== undefined) {
         await closeCreatedTab(createdTabId);
@@ -795,6 +837,7 @@ const provisionProviderConversation = async (
 };
 
 const completedProvisioningResults = new Map<string, ProvisioningResult>();
+const provisioningSelections = new Map<string, string>();
 const completedProvisioningOrder: string[] = [];
 
 const rememberProvisioningResult = (
@@ -807,6 +850,7 @@ const rememberProvisioningResult = (
     const oldest = completedProvisioningOrder.shift();
     if (oldest) {
       completedProvisioningResults.delete(oldest);
+      provisioningSelections.delete(oldest);
     }
   }
 };
@@ -860,13 +904,20 @@ const enqueueProviderProvisioning = (
   requestId: string,
   provider: BrowserProvider,
   eventSocket: WebSocket,
-  options: Pick<ProvisioningInput, "preferredTabId" | "preferredOrigin" | "preferredConversationIdentity" | "fresh"> = {},
+  options: Pick<ProvisioningInput, "preferredTabId" | "preferredOrigin" | "preferredConversationIdentity" | "fresh" | "registryId"> = {},
 ): void => {
+  const selection = JSON.stringify([provider, options.registryId, options.preferredTabId, options.preferredOrigin, options.preferredConversationIdentity, options.fresh ?? false]);
+  const previousSelection = provisioningSelections.get(requestId);
+  if (previousSelection !== undefined && previousSelection !== selection) {
+    sendProvisioningResult(eventSocket, requestId, { provider, success: false, code: "OPEN_CONVERSATION_FAILED", message: "The provisioning request identity changed" });
+    return;
+  }
   const completed = completedProvisioningResults.get(requestId);
   if (completed) {
     sendProvisioningResult(eventSocket, requestId, completed);
     return;
   }
+  provisioningSelections.set(requestId, selection);
   provisioningQueue.enqueue(requestId, { provider, eventSocket, ...options });
 };
 
@@ -1516,6 +1567,15 @@ const handleServerMessage = async (
     await discoverProviderTabs();
     return;
   }
+  if (message.type === "provider.listRecoverableConversations") {
+    sendSocket({ type: "provider.listRecoverableConversations.result", protocolVersion, requestId: message.requestId,
+      records: recoverableRegistry.records });
+    return;
+  }
+  if (message.type === "provider.reopenConversation") {
+    enqueueProviderProvisioning(message.requestId, message.provider, eventSocket, { registryId: message.registryId });
+    return;
+  }
   if (message.type === "provider.openConversation") {
     enqueueProviderProvisioning(message.requestId, message.provider, eventSocket, {
       ...(message.preferredTabId !== undefined ? { preferredTabId: message.preferredTabId } : {}),
@@ -1960,6 +2020,8 @@ const connect = async (): Promise<void> => {
       }
     }
     if (
+      message.type === "provider.listRecoverableConversations" ||
+      message.type === "provider.reopenConversation" ||
       message.type === "provider.openConversation" ||
       message.type === "provider.cancelOpenConversation" ||
       message.type === "bridge.pong"
@@ -2192,7 +2254,7 @@ const applyTransition = async (
   // BB-AUD-09. Whether the move is allowed is decided in `routerState.ts`; what stays here is
   // reading the sender and writing what the decision authorised.
   const admission = admitInitialTransition({
-    ...(request ? { request } : {}),
+    ...(request && activeRequests.get(request.requestId) === request ? { request } : {}),
     ...(binding ? { binding } : {}),
     message,
     supportedTransition: isSupportedInitialTransition,
@@ -2233,6 +2295,26 @@ const applyTransition = async (
     request.submissionCommitted = true;
   }
   documentsByTab.set(admission.binding.tabId, admission.binding);
+  if (request) {
+    const registry = promoteCreatedConversation({ registry: stored.conversationRegistry,
+      marker: provisionalCreations.get(request.tabId), request, binding: admission.binding, now: Date.now() });
+    provisionalCreations.delete(request.tabId);
+    if (registry) {
+      stored.conversationRegistry = registry;
+      await saveStored();
+      recoverableRegistry = registry;
+    }
+    if (activeRequests.get(request.requestId) === request && connected
+      && isStableRecoveryIdentity(request.provider, request.conversationUrl, request.conversationIdentity)) {
+      const timestamp = new Date().toISOString();
+      sendSocket({ type: "conversation.binding", protocolVersion, requestId: request.requestId,
+        agentId: request.agentId, sessionId: request.sessionId,
+        session: { provider: admission.binding.provider, tabId: admission.binding.tabId, frameId: admission.binding.frameId,
+          documentToken: admission.binding.documentToken, conversationUrl: admission.binding.conversationUrl, conversationIdentity: admission.binding.conversationIdentity,
+          ...(admission.binding.documentId === undefined ? {} : { documentId: admission.binding.documentId }),
+          id: sessionIdFor(admission.binding), status: "streaming", createdAt: timestamp, updatedAt: timestamp } });
+    }
+  }
   return { success: true, accepted: true };
 };
 
@@ -2452,7 +2534,8 @@ chrome.runtime.onMessage.addListener(
         if (stored.selectedTabId !== undefined) {
           await releaseOwnedFavicon(stored.selectedTabId);
         }
-        stored = {};
+        provisionalCreations.clear();
+        stored = stored.conversationRegistry ? { conversationRegistry: normalizeConversationRegistry(stored.conversationRegistry) } : {};
         pairingToken = undefined;
         await saveStored();
         return popupState();
@@ -2717,6 +2800,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     // behind would have the next tab's first navigation judged against a dead predecessor —
     // deduplicated away, or refused as a stale document.
     navigationTracker.forgetTab(tabId);
+    provisionalCreations.delete(tabId);
     releasedTabIds.delete(tabId);
     documentsByTab.delete(tabId);
     forgetHandledTab(tabId);
@@ -2767,6 +2851,7 @@ const applyTabChange = async (
    * request that depended on it still go, which is what stops the replaced document acting.
    */
   const dropDocument = async (id: number, failure: string): Promise<void> => {
+    provisionalCreations.delete(id);
     documentsByTab.delete(id);
     failRequestsForTab(id, failure);
     await saveStored();
@@ -2972,6 +3057,7 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
   void initializationPromise
     .then(async () => {
       navigationTracker.replaceTab(addedTabId, removedTabId);
+      provisionalCreations.delete(removedTabId);
       documentsByTab.delete(removedTabId);
       forgetHandledTab(removedTabId);
       failRequestsForTab(removedTabId, "The selected browser tab was replaced");
