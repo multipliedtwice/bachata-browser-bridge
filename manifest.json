@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bachata Browser Bridge",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "description": "Connect ChatGPT, Claude, and other browser AI chats to the steps in your Bachata workflows in VS Code.",
   "minimum_chrome_version": "116",
   "icons": {

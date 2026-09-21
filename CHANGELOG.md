@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.0 — Recoverable browser conversations
+
+- Added a durable, bounded conversation registry so Bachata can reopen an exact ChatGPT or Claude
+  conversation after a restart without replaying the prompt or adopting another conversation.
+- Added protocol-v9 recovery requests, strict provider and registry identity validation, stable
+  reopen checks, and production-path coverage for closed, redirected, and unavailable sessions.
 - Removed the unused `ajv` runtime dependency. Healing answers were already validated by the
   interpreted schema check in `src/content/generic/schemaGuard.ts`; the verifier now requires `ajv`
   to be absent, and the Auto-heal contract documentation says so.
