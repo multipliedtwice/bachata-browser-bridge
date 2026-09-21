@@ -3799,6 +3799,12 @@ const runBackgroundCapturedAssetEntry = async (assetOverrides) => {
 
     const selected = await dispatchRuntimeMessage(listener, { type: "popup.select", tabId: 7 });
     const sessionId = selected.tabs[0].sessionId;
+    socket.emit("message", { data: JSON.stringify({ type: "bridge.pong", protocolVersion: 9, nonce: "unknown" }) });
+    socket.emit("message", { data: JSON.stringify({ type: "provider.discover", protocolVersion: 9 }) });
+    socket.emit("message", { data: JSON.stringify({ type: "provider.listRecoverableConversations", protocolVersion: 9, requestId: "asset-list" }) });
+    socket.emit("message", { data: JSON.stringify({ type: "provider.cancelOpenConversation", protocolVersion: 9, requestId: "asset-cancel" }) });
+    await nextTurn();
+    assert.equal(socket.sent.find((message) => message.requestId === "asset-list")?.type, "provider.listRecoverableConversations.result");
     socket.emit("message", {
       data: JSON.stringify({
         type: "conversation.send",
@@ -3850,6 +3856,44 @@ const runBackgroundCapturedAssetEntry = async (assetOverrides) => {
       },
     }, sender);
     for (let turn = 0; turn < 4; turn += 1) await nextTurn();
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "asset.fetch",
+        protocolVersion: 9,
+        transferId: "asset-transfer",
+        assetId: "asset-1",
+        maxBytes: 32,
+      }),
+    });
+    await nextTurn();
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "asset.cancel",
+        protocolVersion: 9,
+        transferId: "asset-transfer",
+        assetId: "asset-1",
+      }),
+    });
+    await nextTurn();
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "bridge.error",
+        protocolVersion: 9,
+        code: "TEST",
+        message: "failed",
+      }),
+    });
+    await nextTurn();
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "asset.reveal",
+        protocolVersion: 9,
+        requestId: "asset-reveal",
+        assetId: "asset-1",
+      }),
+    });
+    await nextTurn();
+    assert.equal(socket.sent.find((message) => message.requestId === "asset-reveal")?.success, ack.success === true);
     return {
       ack,
       responses: socket.sent.filter((message) => message.type === "conversation.response"),

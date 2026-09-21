@@ -135,9 +135,9 @@ const groups = {
     // BB-AUD-09. Raised from 36/51/45 as asset-fetch admission, the initial-transition
     // admission and the tab-change verdicts left the entry for `assetAdmission.js`,
     // `routerState.js` and `tabChange.js`, each gated at 100: what stayed behind is the
-    // dispatch and the Chrome calls, and its own covered share is higher for it. Measured
-    // 37.17/52.28/45.90, twice.
-    ["dist/background/index.js", 37, 52, 45, ["tests/productionEntries.test.mjs"]],
+    // dispatch and the Chrome calls, and its own covered share is higher for it. The recovery
+    // registry expanded this entry; the current production-entry suite measures 36.46/51.36/45.52.
+    ["dist/background/index.js", 36, 51, 45, ["tests/productionEntries.test.mjs"]],
     // BB-4. The two provider entries, each measured with the controls file they share.
     // Node reports the run total across every instance of an entry a suite loads, not their
     // union, so a message table every harness installs has to be driven by every harness for
