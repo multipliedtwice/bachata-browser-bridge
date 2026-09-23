@@ -74,6 +74,10 @@
     #pairing-form { display: grid; gap: 12px; }
     .token-field { display: grid; gap: 6px; min-width: 0; }
     .token-actions { display: flex; gap: 2px; }
+    .otp-inputs { display: grid; grid-template-columns: repeat(4, 52px); justify-content: center; gap: 10px; padding: 2px 0; }
+    input.otp-input { width: 52px; height: 56px; min-height: 56px; padding: 0; border-radius: 10px; font-size: 24px; font-weight: 650; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; caret-color: var(--accent); }
+    input.otp-input:focus-visible { border-color: var(--text); outline: 2px solid var(--focus); outline-offset: 2px; }
+    input.otp-input.invalid { border-color: var(--danger); }
     input { display: block; width: 100%; min-width: 0; min-height: 40px; font: inherit; padding: 9px 11px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 1px 2px rgb(0 0 0 / 3%); }
     input::placeholder { color: var(--muted); }
     input.invalid { border-color: var(--danger); }
@@ -93,13 +97,11 @@
     .row > .grow { flex: 1; min-width: 0; }
     .form-actions > .primary { flex-basis: 100%; min-height: 40px; }
     .connection-summary { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-    .connection-summary code { flex: 1 1 100%; min-width: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 4px; }
+    .connection-summary > span { flex: 1; color: var(--muted); font-size: 12px; }
     .field-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
     details { min-width: 0; }
     summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 6px 0; }
     summary:hover { color: var(--text); }
-    #connection-advanced > :not(summary) { margin-top: 8px; }
-    #connection-advanced input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
     .notice { display: flex; align-items: flex-start; gap: 6px; padding: 10px; border-radius: 7px; background: var(--danger-bg); color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
     .notice .grow { flex: 1; min-width: 0; }
     .notice button { color: inherit; }

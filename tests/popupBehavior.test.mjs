@@ -9,7 +9,8 @@ import {
   readyPair,
   state,
   byId,
-  type,
+  pairingValue,
+  typePairing,
   click,
 } from "./support/popupDom.mjs";
 
@@ -57,7 +58,7 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
       if (clipboardReads === 2) {
         throw new Error("Read permission denied");
       }
-      return clipboardReads === 3 ? "   " : "  clipboard-token  ";
+      return clipboardReads === 3 ? "   " : "  2468  ";
     },
   );
   try {
@@ -67,9 +68,9 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.deepEqual(messages[0], { type: "popup.getState" });
     assert.equal(byId("connection").textContent, "Disconnected");
     assert.equal(byId("connection").classList.contains("disconnected"), true);
-    assert.equal(byId("endpoint").value, endpoint);
+    assert.equal(byId("endpoint"), null);
     assert.equal(byId("pair").disabled, true);
-    assert.equal(byId("token-reveal").disabled, true);
+    assert.equal(byId("token-inputs").querySelectorAll("input").length, 4);
     assert.equal(byId("tabs-empty").hidden, true);
     assert.equal(byId("tab-list").children.length, 4);
     assert.equal(byId("bind-7").hidden, true);
@@ -91,19 +92,8 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     byId("favicon-8").fire("error");
     assert.equal(byId("favicon-8").hidden, true);
 
-    type("endpoint", "ws://example.com:1/x");
-    assert.equal(byId("endpoint-error").hidden, false);
-    assert.match(byId("endpoint-error").textContent, /loopback WebSocket URL/);
-    assert.equal(byId("endpoint").classList.contains("invalid"), true);
-    assert.equal(byId("pair").disabled, true);
-    byId("pairing-form").fire("submit");
-    await nextTurn();
-    assert.equal(messages.length, 1);
-
-    type("endpoint", endpoint);
-    assert.equal(byId("endpoint-error").hidden, true);
     await click("token-paste");
-    assert.equal(byId("token").value, "clipboard-token");
+    assert.equal(pairingValue(), "2468");
     assert.equal(byId("token-error").hidden, true);
     assert.equal(byId("pair").disabled, false);
 
@@ -114,21 +104,16 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     await click("token-paste");
     assert.equal(byId("token-error").hidden, false);
     assert.match(byId("token-error").textContent, /clipboard is empty/);
-    assert.equal(byId("token").value, "clipboard-token");
+    assert.equal(pairingValue(), "2468");
 
-    type("token", "bachata-token");
+    typePairing("1357");
     assert.equal(byId("token-error").hidden, true);
     assert.equal(byId("pair").disabled, false);
-    assert.equal(byId("token").type, "password");
-    await click("token-reveal");
-    assert.equal(byId("token").type, "text");
-    assert.equal(byId("token-reveal").textContent, "Hide");
 
     byId("pairing-form").fire("submit");
     await nextTurn();
-    assert.deepEqual(messages[1], { type: "popup.pair", endpoint, token: "bachata-token" });
-    assert.equal(byId("token").value, "");
-    assert.equal(byId("token").type, "password");
+    assert.deepEqual(messages[1], { type: "popup.pair", endpoint, token: "1357" });
+    assert.equal(pairingValue(), "");
     assert.equal(byId("connection").textContent, "Connected");
     assert.equal(byId("connection-section").hidden, true);
     assert.equal(byId("connection").getAttribute("aria-expanded"), "false");
@@ -137,19 +122,10 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.equal(byId("connection-section").hidden, false);
     assert.equal(byId("connection-summary").hidden, false);
     assert.equal(byId("pairing-form").hidden, true);
-    assert.equal(byId("endpoint-summary").textContent, "127.0.0.1:43127");
     assert.equal(byId("bind-7").hidden, false);
     assert.equal(byId("bind-8").hidden, true);
-
-    await click("edit-connection");
-    assert.equal(byId("pairing-form").hidden, false);
-    assert.equal(byId("cancel-edit").hidden, false);
-    type("endpoint", "ws://127.0.0.1:1/bachata-browser-bridge-v9");
-    await click("cancel-edit");
-    assert.equal(byId("pairing-form").hidden, true);
     await click("connection");
     assert.equal(byId("connection-section").hidden, true);
-    assert.equal(byId("endpoint").value, endpoint);
 
     await click("bind-8");
     assert.equal(messages.length, 2);
@@ -228,10 +204,10 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
     assert.equal(byId("connection").textContent, "Disconnected");
     assert.equal(byId("retry").hidden, true);
 
-    type("token", "second-token");
+    typePairing("8642");
     byId("pairing-form").fire("submit");
     await nextTurn();
-    assert.deepEqual(messages[11], { type: "popup.pair", endpoint, token: "second-token" });
+    assert.deepEqual(messages[11], { type: "popup.pair", endpoint, token: "8642" });
     assert.equal(byId("connection-notice").hidden, false);
     assert.equal(byId("connection-error").textContent, "Pairing token rejected");
     assert.equal(byId("binding-notice").hidden, true);
@@ -250,10 +226,10 @@ test("popup drives the whole pairing, binding, and failure lifecycle", async () 
       assert.equal(byId("connection").textContent, "Disconnected");
     }
 
-    type("token", "third-token");
+    typePairing("9753");
     byId("pairing-form").fire("submit");
     await nextTurn();
-    assert.equal(byId("token").value, "third-token");
+    assert.equal(pairingValue(), "9753");
     assert.equal(byId("pairing-form").hidden, false);
     assert.equal(byId("connection").textContent, "Disconnected");
 

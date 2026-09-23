@@ -283,6 +283,19 @@ const type = (id, value) => {
   element.value = value;
   element.fire("input");
 };
+const pairingValue = () => [1, 2, 3, 4].map((index) => byId(`token-${index}`).value).join("");
+const typePairing = (value) => {
+  [1, 2, 3, 4].forEach((index) => {
+    const element = byId(`token-${index}`);
+    element.value = value[index - 1] ?? "";
+    element.fire("input");
+  });
+};
+const pastePairing = (value, index = 1) => {
+  byId(`token-${index}`).fire("paste", {
+    clipboardData: { getData: () => value },
+  });
+};
 const click = async (id) => {
   const element = byId(id);
   if (!element.hidden && !element.disabled) {
@@ -302,5 +315,8 @@ export {
   state,
   byId,
   type,
+  pairingValue,
+  typePairing,
+  pastePairing,
   click,
 };

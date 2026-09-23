@@ -7,7 +7,8 @@ import {
   installGlobals,
   state,
   byId,
-  type,
+  pairingValue,
+  typePairing,
   click,
 } from "./support/popupDom.mjs";
 
@@ -37,20 +38,6 @@ test("Reconnect now cancels an older pending Paste & Pair intent", async () => {
   }
 });
 
-test("popup preserves endpoint edits made before delayed initial state", async () => {
-  const initial = deferred();
-  const restore = installGlobals(async () => initial.promise);
-  try {
-    await import(`../dist/popup/index.js?popup-endpoint-race=${String(Math.random())}`);
-    type("endpoint", "ws://127.0.0.1:44000/bachata-browser-bridge-v9");
-    initial.resolve(state());
-    await nextTurn();
-    assert.equal(byId("endpoint").value, "ws://127.0.0.1:44000/bachata-browser-bridge-v9");
-  } finally {
-    restore();
-  }
-});
-
 test("popup does not overwrite a newer token edit with a delayed clipboard read", async () => {
   const clipboard = deferred();
   const restore = installGlobals(async () => state(), async () => clipboard.promise);
@@ -58,10 +45,10 @@ test("popup does not overwrite a newer token edit with a delayed clipboard read"
     await import(`../dist/popup/index.js?popup-clipboard-race=${String(Math.random())}`);
     await nextTurn();
     byId("token-paste").fire("click");
-    type("token", "typed-after-click");
+    typePairing("2468");
     clipboard.resolve("stale-clipboard-token");
     await nextTurn();
-    assert.equal(byId("token").value, "typed-after-click");
+    assert.equal(pairingValue(), "2468");
     assert.equal(byId("token-error").hidden, true);
   } finally {
     restore();
@@ -71,7 +58,7 @@ test("popup does not overwrite a newer token edit with a delayed clipboard read"
 test("Paste & Pair does not pair a second time after a manual pair wins the race", async () => {
   const clipboard = deferred();
   const messages = [];
-  const manualToken = "b".repeat(43);
+  const manualToken = "1357";
   const restore = installGlobals(
     async (message) => {
       messages.push(message);
@@ -83,7 +70,7 @@ test("Paste & Pair does not pair a second time after a manual pair wins the race
     await import(`../dist/popup/index.js?paste-pair-manual-race=${String(Math.random())}`);
     await nextTurn();
     // A token is already typed, so the form can pair manually while the clipboard read is deferred.
-    type("token", manualToken);
+    typePairing(manualToken);
     byId("token-paste-pair").fire("click");
     byId("pairing-form").fire("submit");
     await nextTurn();

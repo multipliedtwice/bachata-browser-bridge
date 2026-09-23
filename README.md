@@ -89,8 +89,8 @@ Do not zip the working directory directly.
    repository root is the maintained source of the manifest, not a loadable extension:
    it references paths that exist only after `npm run build` copies them into `dist/`.
    Loading the repository root in Chrome fails by design.
-2. Copy the pairing code from Bachata’s Browser Bridge settings in VS Code, then open the browser popup.
-3. Select **Paste & connect**. The code selects the local port. No URL paste. Legacy raw tokens use the address under **Connection settings**.
+2. Copy the four-digit pairing code from Bachata’s Browser Bridge settings in VS Code, then open the browser popup.
+3. Select **Paste & connect**. The default local port needs no URL. A custom-port code selects its port automatically.
 4. Open a ChatGPT or Claude conversation, sign in, then select **Refresh tabs**.
 5. Select **Use this chat** on a ready conversation. Each row shows its provider, title, readiness and any limitations; **Details** contains its tab ID and conversation identity.
 

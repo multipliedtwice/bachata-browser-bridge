@@ -10,7 +10,7 @@ The Browser Bridge sees provider pages and the loopback Bachata connection. It h
 - No endpoint credentials, query, fragment, alternate host, or alternate path.
 - Exact Chrome extension origin captured at pairing and stored with the connection token.
 - Missing Origin, malformed Origin, and another extension origin are rejected.
-- One-use pairing token and persistent connection token.
+- Four-digit, one-use pairing code valid until use, reset, or Bridge shutdown, with a global three-failure lockout, followed by a persistent high-entropy connection token.
 - Authentication deadline and pre-authentication limits.
 - Post-authentication message, byte, rate, queue, and connection limits.
 - Strict JSON schemas.
@@ -38,7 +38,7 @@ The one-use pairing token stays in popup memory until pairing succeeds. It is no
 
 The token field is masked until the user presses Show. Clipboard reads happen only on an explicit Paste press and never automatically; a blocked read surfaces an inline message instead of failing silently.
 
-Pairing codes use `v9.<port>.<token>`. Only port varies. Popup fixes scheme, host, and path to Protocol v9 loopback. Raw tokens remain supported with the visible endpoint.
+Default-port pairing uses four digits. Custom-port codes use `v9.<port>.<code>` so only the port varies; the popup fixes scheme, host, and path to Protocol v9 loopback. The previous 43-character token remains accepted during migration.
 
 ## Provisioning
 

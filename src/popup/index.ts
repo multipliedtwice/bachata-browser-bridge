@@ -87,9 +87,10 @@ let state: State = {
 // The canonical endpoint remains the fallback for legacy tokens. New pairing codes carry only a
 // validated loopback port, so a dynamically allocated Bridge can be reached without copying a URL.
 const canonicalEndpoint = "ws://127.0.0.1:43127/bachata-browser-bridge-v9";
-// `randomBytes(32).toString("base64url")` on the VS Code side: 43 unpadded base64url characters.
-const pairingTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
-const pairingCodePattern = /^v9\.([1-9][0-9]{0,4})\.([A-Za-z0-9_-]{43})$/u;
+// Current builds use a four-digit one-time code. The former 43-character value remains accepted
+// while installed VS Code and browser releases may be upgraded in either order.
+const pairingTokenPattern = /^(?:[0-9]{4}|[A-Za-z0-9_-]{43})$/u;
+const pairingCodePattern = /^v9\.([1-9][0-9]{0,4})\.([0-9]{4}|[A-Za-z0-9_-]{43})$/u;
 
 type RoutedPairing = {
   endpoint: string;
@@ -110,10 +111,9 @@ let endpointDraft = "";
 let endpointInitialized = false;
 let endpointDirty = false;
 let tokenDraft = "";
-let tokenVisible = false;
+let otpDraft = ["", "", "", ""];
 let tokenError = "";
 let pasting = false;
-let editingConnection = false;
 let connectionOpen = false;
 let choosingConversation = false;
 let errorScope: ErrorScope = "connection";
@@ -420,61 +420,51 @@ const buildDom = () => {
   connectionNotice.setAttribute("role", "alert");
   connectionNotice.append(connectionNoticeText, connectionDismiss);
 
-  const endpointSummary = create("code", { id: "endpoint-summary" });
-  const editConnection = create("button", { id: "edit-connection", className: "ghost small", text: "Edit" });
   const disconnect = create("button", { id: "disconnect", className: "ghost small", text: "Disconnect" });
   const summary = create("div", { id: "connection-summary", className: "connection-summary" });
-  summary.append(endpointSummary, editConnection, disconnect);
+  summary.append(create("span", { text: "Connected to VS Code" }), disconnect);
 
-  const endpointLabel = create("label", { text: "Local connection address" });
-  endpointLabel.setAttribute("for", "endpoint");
-  const endpointInput = create("input", { id: "endpoint" });
-  endpointInput.placeholder = canonicalEndpoint;
-  endpointInput.autocomplete = "off";
-  endpointInput.spellcheck = false;
-  const endpointError = create("p", { id: "endpoint-error", className: "field-error" });
-  endpointInput.setAttribute("aria-describedby", "endpoint-hint endpoint-error");
-  const endpointHint = create("p", { id: "endpoint-hint", className: "hint", text: "Change this only if Bachata in VS Code uses a different local address." });
-  const advanced = create("details", { id: "connection-advanced" });
-  advanced.open = false;
-  advanced.append(create("summary", { text: "Connection settings" }), endpointLabel, endpointInput, endpointError, endpointHint);
-
-  const tokenLabel = create("label", { text: "Pairing code" });
-  tokenLabel.setAttribute("for", "token");
-  const tokenInput = create("input", { id: "token" });
-  tokenInput.type = "password";
-  tokenInput.placeholder = "Paste from VS Code";
-  tokenInput.autocomplete = "off";
-  tokenInput.spellcheck = false;
+  const tokenLabel = create("label", { id: "token-label", text: "Pairing code" });
+  tokenLabel.setAttribute("for", "token-1");
+  const tokenInputs = Array.from({ length: 4 }, (_, index) => {
+    const input = create("input", { id: `token-${String(index + 1)}`, className: "otp-input" });
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.autocomplete = index === 0 ? "one-time-code" : "off";
+    input.maxLength = 1;
+    input.pattern = "[0-9]*";
+    input.spellcheck = false;
+    input.setAttribute("aria-label", `Pairing code digit ${String(index + 1)} of 4`);
+    input.setAttribute("aria-describedby", "token-hint token-error");
+    return input;
+  });
+  const tokenInputGroup = create("div", { id: "token-inputs", className: "otp-inputs" });
+  tokenInputGroup.setAttribute("role", "group");
+  tokenInputGroup.setAttribute("aria-labelledby", "token-label");
+  tokenInputGroup.append(...tokenInputs);
   const tokenPaste = create("button", { id: "token-paste", className: "ghost small", text: "Paste" });
   tokenPaste.type = "button";
   const tokenPastePair = create("button", { id: "token-paste-pair", className: "primary grow", text: "Paste & connect" });
   tokenPastePair.type = "button";
-  const tokenReveal = create("button", { id: "token-reveal", className: "ghost small", text: "Show" });
-  tokenReveal.type = "button";
   const tokenActions = create("div", { className: "token-actions" });
-  tokenActions.append(tokenPaste, tokenReveal);
+  tokenActions.append(tokenPaste);
   const tokenHeading = create("div", { className: "field-heading" });
   tokenHeading.append(tokenLabel, tokenActions);
   const tokenField = create("div", { className: "token-field" });
-  tokenField.append(tokenHeading, tokenInput);
+  tokenField.append(tokenHeading, tokenInputGroup);
   const tokenErrorText = create("p", { id: "token-error", className: "field-error" });
   tokenErrorText.setAttribute("role", "alert");
-  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Copy the pairing code from Bachata’s Browser Bridge settings in VS Code. It selects the local port automatically." });
+  const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Enter the four-digit code shown in Bachata. It remains valid until used or reset." });
 
-  tokenInput.setAttribute("aria-describedby", "token-hint token-error");
-  tokenReveal.setAttribute("aria-controls", "token");
   const pair = create("button", { id: "pair", className: "primary grow", text: "Connect to VS Code" });
   pair.type = "submit";
   const cancelConnect = create("button", { id: "cancel-connect", className: "ghost", text: "Cancel" });
   cancelConnect.type = "button";
-  const cancelEdit = create("button", { id: "cancel-edit", className: "ghost", text: "Keep current" });
-  cancelEdit.type = "button";
   const formActions = create("div", { className: "row form-actions" });
-  formActions.append(tokenPastePair, pair, cancelConnect, cancelEdit);
+  formActions.append(tokenPastePair, pair, cancelConnect);
 
   const form = create("form", { id: "pairing-form" });
-  form.append(tokenHint, tokenField, tokenErrorText, formActions, advanced);
+  form.append(tokenHint, tokenField, tokenErrorText, formActions);
 
   const retryText = create("span", { id: "retry-text" });
   const reconnect = create("button", { id: "reconnect", className: "small", text: "Reconnect now" });
@@ -522,21 +512,15 @@ const buildDom = () => {
     connectionNoticeText,
     connectionDismiss,
     summary,
-    endpointSummary,
-    editConnection,
     disconnect,
     form,
-    endpointInput,
-    advanced,
-    endpointError,
-    tokenInput,
+    tokenInputs,
+    tokenInputGroup,
     tokenPaste,
     tokenPastePair,
-    tokenReveal,
     tokenErrorText,
     pair,
     cancelConnect,
-    cancelEdit,
     retry,
     retryText,
     reconnect,
@@ -557,6 +541,59 @@ const buildDom = () => {
 const dom = buildDom();
 const rows = new Map<number, Row>();
 installGenericManagement(dom.conversationsSection);
+
+const displayedPairingCode = (value: string): string => {
+  const token = routedPairing(value)?.token ?? value.trim();
+  return /^[0-9]{0,4}$/u.test(token) ? token : "";
+};
+
+const writeOtp = (value: string): void => {
+  const code = displayedPairingCode(value);
+  otpDraft = Array.from({ length: 4 }, (_, index) => code[index] ?? "");
+  dom.tokenInputs.forEach((input, index) => {
+    const digit = otpDraft[index] ?? "";
+    if (input.value !== digit) input.value = digit;
+  });
+};
+
+const focusOtp = (preferred = 0): void => {
+  const empty = dom.tokenInputs.findIndex((input) => input.value === "");
+  dom.tokenInputs[empty >= 0 ? empty : Math.min(preferred, dom.tokenInputs.length - 1)]?.focus();
+};
+
+const pairingDraftReady = (): boolean => {
+  const trimmed = tokenDraft.trim();
+  return routedPairing(trimmed) !== undefined || pairingTokenPattern.test(trimmed);
+};
+
+const endpointForPairing = (value: string, fallback: string): string => {
+  const trimmed = value.trim();
+  return routedPairing(trimmed)?.endpoint ?? (/^[0-9]{4}$/u.test(trimmed) ? canonicalEndpoint : fallback);
+};
+
+const useCanonicalEndpointForShortCode = (value: string): void => {
+  if (!/^[0-9]{4}$/u.test(value.trim())) return;
+  endpointDraft = canonicalEndpoint;
+  endpointDirty = false;
+};
+
+const acceptPairingValue = (value: string): boolean => {
+  const trimmed = value.trim();
+  const routed = routedPairing(trimmed);
+  if (!routed && !pairingTokenPattern.test(trimmed)) return false;
+  tokenDraft = trimmed;
+  if (routed) {
+    endpointDraft = routed.endpoint;
+    endpointDirty = true;
+  } else {
+    useCanonicalEndpointForShortCode(trimmed);
+  }
+  tokenEditRevision += 1;
+  invalidatePairingIntent();
+  writeOtp(tokenDraft);
+  tokenError = "";
+  return true;
+};
 
 const createRow = (tabId: number): Row => {
   const avatar = create("span", { className: "avatar" });
@@ -705,7 +742,7 @@ const restoreFocus = (activeId: string): void => {
     if (!dom.form.hidden && !dom.connectionSection.hidden) {
       const target = dom.pair.hidden ? dom.tokenPastePair : dom.pair;
       if (!target.disabled) target.focus();
-      else dom.tokenInput.focus();
+      else focusOtp();
       return;
     }
   }
@@ -780,48 +817,34 @@ const render = (): void => {
   setHidden(dom.connectionSection, !showConnection);
   dom.connectionPill.setAttribute("aria-expanded", showConnection ? "true" : "false");
 
-  const collapsed = state.connected && !editingConnection;
+  const collapsed = state.connected;
   setHidden(dom.summary, !collapsed);
   setHidden(dom.form, collapsed);
-  const activeEndpoint = state.endpoint ?? endpointDraft;
-  setText(dom.endpointSummary, hostOf(activeEndpoint));
-  setTitle(dom.endpointSummary, activeEndpoint);
   setHidden(dom.subtitle, state.connected);
-  setDisabled(dom.editConnection, pending);
   setDisabled(dom.disconnect, pending);
 
-  if (dom.endpointInput !== document.activeElement && dom.endpointInput.value !== endpointDraft) {
-    dom.endpointInput.value = endpointDraft;
-  }
   const problem = endpointProblem(endpointDraft);
-  setText(dom.endpointError, problem);
-  setHidden(dom.endpointError, problem === "");
-  dom.endpointInput.classList.toggle("invalid", problem !== "");
-  dom.endpointInput.setAttribute("aria-invalid", problem !== "" ? "true" : "false");
-  if (problem !== "") dom.advanced.open = true;
-  setDisabled(dom.endpointInput, pending);
-  setDisabled(dom.tokenInput, pending);
+  dom.tokenInputs.forEach((input) => setDisabled(input, pending));
   setDisabled(dom.tokenPaste, pending || pasting);
   setDisabled(dom.tokenPastePair, pending || pasting || !endpointDraft.trim() || problem !== "");
-  setDisabled(dom.tokenReveal, pending || tokenDraft === "");
   setText(dom.tokenErrorText, tokenError);
   setHidden(dom.tokenErrorText, tokenError === "");
-  setText(dom.tokenReveal, tokenVisible ? "Hide" : "Show");
-  dom.tokenReveal.setAttribute("aria-label", tokenVisible ? "Hide pairing token" : "Show pairing token");
-  dom.tokenReveal.setAttribute("aria-pressed", tokenVisible ? "true" : "false");
-  dom.tokenInput.setAttribute("aria-invalid", tokenError !== "" ? "true" : "false");
+  dom.tokenInputs.forEach((input) => {
+    input.setAttribute("aria-invalid", tokenError !== "" ? "true" : "false");
+    input.classList.toggle("invalid", tokenError !== "");
+  });
+  dom.tokenInputs.forEach((input, index) => {
+    if (document.activeElement !== input && input.value !== (otpDraft[index] ?? "")) {
+      input.value = otpDraft[index] ?? "";
+    }
+  });
   setHidden(dom.tokenPastePair, tokenDraft.trim() !== "");
   setHidden(dom.pair, tokenDraft.trim() === "");
   setText(dom.tokenPastePair, pasting ? "Reading clipboard…" : pending ? "Please wait…" : "Paste & connect");
   setText(dom.pair, pending ? "Please wait…" : "Connect to VS Code");
-  if (dom.tokenInput.type !== (tokenVisible ? "text" : "password")) {
-    dom.tokenInput.type = tokenVisible ? "text" : "password";
-  }
-  setDisabled(dom.pair, pending || !endpointDraft.trim() || !tokenDraft.trim() || problem !== "");
+  setDisabled(dom.pair, pending || !endpointDraft.trim() || !pairingDraftReady() || problem !== "");
   setHidden(dom.cancelConnect, !state.connecting);
   setDisabled(dom.cancelConnect, pending);
-  setHidden(dom.cancelEdit, !(state.connected && editingConnection));
-  setDisabled(dom.cancelEdit, pending);
 
   const retrying = typeof state.retryInMs === "number" && state.retryInMs > 0;
   setHidden(dom.retry, !retrying);
@@ -855,7 +878,7 @@ const replaceState = (nextState: State): boolean => {
     if (!endpointDirty) {
       endpointDraft = nextState.endpoint ?? canonicalEndpoint;
     }
-  } else if (!endpointDirty && dom.endpointInput !== document.activeElement) {
+  } else if (!endpointDirty) {
     endpointDraft = nextState.endpoint ?? canonicalEndpoint;
   }
   if (JSON.stringify(nextState) === JSON.stringify(state)) {
@@ -935,10 +958,8 @@ const apply = async (message: unknown): Promise<void> => {
       tokenDraft = "";
       tokenEditRevision += 1;
       invalidatePairingIntent();
-      tokenVisible = false;
-      editingConnection = false;
       connectionOpen = false;
-      dom.tokenInput.value = "";
+      writeOtp("");
     }
     if (acceptedState && type === "popup.select") {
       choosingConversation = false;
@@ -956,18 +977,60 @@ const apply = async (message: unknown): Promise<void> => {
   }
 };
 
-dom.endpointInput.addEventListener("input", () => {
-  endpointDraft = dom.endpointInput.value;
-  endpointDirty = true;
-  invalidatePairingIntent();
-  render();
-});
-dom.tokenInput.addEventListener("input", () => {
-  tokenDraft = dom.tokenInput.value;
-  tokenEditRevision += 1;
-  invalidatePairingIntent();
-  tokenError = "";
-  render();
+dom.tokenInputs.forEach((input, index) => {
+  input.addEventListener("input", () => {
+    const digits = input.value.replace(/[^0-9]/gu, "");
+    if (digits.length >= 4) {
+      tokenDraft = digits.slice(0, 4);
+      writeOtp(tokenDraft);
+      focusOtp(3);
+    } else {
+      input.value = digits.slice(-1);
+      otpDraft[index] = input.value;
+      tokenDraft = otpDraft.join("");
+      useCanonicalEndpointForShortCode(tokenDraft);
+      if (input.value !== "" && index < dom.tokenInputs.length - 1) {
+        dom.tokenInputs[index + 1]?.focus();
+      }
+    }
+    tokenEditRevision += 1;
+    invalidatePairingIntent();
+    tokenError = "";
+    render();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Backspace" && input.value === "" && index > 0) {
+      event.preventDefault();
+      const previous = dom.tokenInputs[index - 1];
+      if (previous) {
+        previous.value = "";
+        otpDraft[index - 1] = "";
+        previous.focus();
+        tokenDraft = otpDraft.join("");
+        tokenEditRevision += 1;
+        invalidatePairingIntent();
+        tokenError = "";
+        render();
+      }
+    } else if (event.key === "ArrowLeft" && index > 0) {
+      event.preventDefault();
+      dom.tokenInputs[index - 1]?.focus();
+    } else if (event.key === "ArrowRight" && index < dom.tokenInputs.length - 1) {
+      event.preventDefault();
+      dom.tokenInputs[index + 1]?.focus();
+    }
+  });
+  input.addEventListener("paste", (event) => {
+    const pasted = event.clipboardData?.getData("text") ?? "";
+    if (pasted === "") return;
+    event.preventDefault();
+    if (!acceptPairingValue(pasted)) {
+      if (pasted.trim().startsWith("v9.")) tokenDraft = pasted.trim();
+      tokenError = "That is not a valid four-digit pairing code.";
+    }
+    render();
+    focusOtp(3);
+  });
 });
 dom.tokenPaste.addEventListener("click", () => {
   if (pasting) {
@@ -984,27 +1047,17 @@ dom.tokenPaste.addEventListener("click", () => {
       }
       if (pasted === "") {
         tokenError = "The clipboard is empty. Copy the pairing code in VS Code.";
-      } else {
-        const routed = routedPairing(pasted);
-        tokenDraft = pasted;
-        if (routed) {
-          endpointDraft = routed.endpoint;
-          endpointDirty = true;
-          dom.endpointInput.value = routed.endpoint;
-        }
-        tokenEditRevision += 1;
-        invalidatePairingIntent();
-        dom.tokenInput.value = tokenDraft;
-        tokenError = "";
+      } else if (!acceptPairingValue(pasted)) {
+        tokenError = "That is not a valid four-digit pairing code.";
       }
     } catch {
       if (editRevision === tokenEditRevision) {
-        tokenError = "Clipboard unavailable. Paste into the token field with ⌘V or Ctrl+V.";
+        tokenError = "Clipboard unavailable. Paste into the pairing code boxes with ⌘V or Ctrl+V.";
       }
     } finally {
       pasting = false;
       render();
-      dom.tokenInput.focus();
+      focusOtp(3);
     }
   })();
 });
@@ -1035,7 +1088,7 @@ dom.tokenPastePair.addEventListener("click", () => {
       token = (await withTimeout(navigator.clipboard.readText(), 3_000)).trim();
     } catch {
       if (editRevision === tokenEditRevision && intentRevision === pairingIntentRevision) {
-        tokenError = "Clipboard unavailable. Paste into the token field with ⌘V or Ctrl+V, then Connect.";
+        tokenError = "Clipboard unavailable. Paste into the pairing code boxes with ⌘V or Ctrl+V, then Connect.";
       }
       pasting = false;
       render();
@@ -1060,28 +1113,15 @@ dom.tokenPastePair.addEventListener("click", () => {
         : "That is not a pairing token or code. Copy it again in VS Code.";
       pasting = false;
       render();
-      dom.tokenInput.focus();
+      focusOtp();
       return;
     }
-    const pairingEndpoint = routed?.endpoint ?? endpoint;
-    tokenDraft = token;
-    if (routed) {
-      endpointDraft = routed.endpoint;
-      endpointDirty = true;
-      dom.endpointInput.value = routed.endpoint;
-    }
-    tokenEditRevision += 1;
-    dom.tokenInput.value = tokenDraft;
-    tokenError = "";
+    const pairingEndpoint = endpointForPairing(token, endpoint);
+    acceptPairingValue(token);
     pasting = false;
     render();
     await apply({ type: "popup.pair", endpoint: pairingEndpoint, token: routed?.token ?? tokenDraft });
   })();
-});
-dom.tokenReveal.addEventListener("click", () => {
-  tokenVisible = !tokenVisible;
-  render();
-  dom.tokenInput.focus();
 });
 dom.form.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1091,36 +1131,23 @@ dom.form.addEventListener("submit", (event) => {
     render();
     return;
   }
-  const endpoint = routed?.endpoint ?? endpointDraft;
+  const endpoint = endpointForPairing(tokenDraft, endpointDraft);
   const token = routed?.token ?? tokenDraft.trim();
-  if (pending || !endpoint.trim() || !token || endpointProblem(endpoint) !== "") {
+  if (!pairingTokenPattern.test(token)) {
+    tokenError = token === "" ? "Enter the four-digit pairing code." : "Enter all four digits.";
+    render();
+    focusOtp();
+    return;
+  }
+  if (pending || !endpoint.trim() || endpointProblem(endpoint) !== "") {
     return;
   }
   if (routed) {
     endpointDraft = routed.endpoint;
     endpointDirty = true;
-    dom.endpointInput.value = routed.endpoint;
   }
   invalidatePairingIntent();
   void apply({ type: "popup.pair", endpoint, token });
-});
-dom.editConnection.addEventListener("click", () => {
-  editingConnection = true;
-  dom.advanced.open = true;
-  render();
-  dom.endpointInput.focus();
-});
-dom.cancelEdit.addEventListener("click", () => {
-  editingConnection = false;
-  endpointDirty = false;
-  endpointDraft = state.endpoint ?? "";
-  tokenDraft = "";
-  tokenEditRevision += 1;
-  invalidatePairingIntent();
-  tokenVisible = false;
-  dom.endpointInput.value = endpointDraft;
-  dom.tokenInput.value = "";
-  render();
 });
 dom.disconnect.addEventListener("click", () => {
   invalidatePairingIntent();

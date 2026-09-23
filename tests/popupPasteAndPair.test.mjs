@@ -3,21 +3,23 @@ import test from "node:test";
 
 import {
   nextTurn,
-  deferred,
   installGlobals,
   endpoint,
   state,
   byId,
   type,
+  pairingValue,
+  typePairing,
+  pastePairing,
   click,
 } from "./support/popupDom.mjs";
 
-const validToken = "a".repeat(43);
+const validToken = "1234";
 const otherEndpoint = "ws://127.0.0.1:51000/bachata-browser-bridge-v9";
 const routedCode = `v9.51000.${validToken}`;
 
 /**
- * Legacy tokens still pair against the visible endpoint. Arbitrary clipboard values remain
+ * Pairing codes use the visible endpoint. Arbitrary clipboard values remain
  * invalid; only the constrained versioned pairing-code form may select another loopback port.
  */
 test("Paste & Pair carries only the token, and refuses a clipboard that is not one", async () => {
@@ -39,8 +41,7 @@ test("Paste & Pair carries only the token, and refuses a clipboard that is not o
     await import(`../dist/popup/index.js?paste-pair=${String(Math.random())}`);
     await nextTurn();
 
-    // The endpoint is canonical without the reader carrying it, which is what makes one paste enough.
-    assert.equal(byId("endpoint").value, endpoint);
+    assert.equal(byId("endpoint"), null, "the popup exposed a connection URL field");
 
     // First clipboard: not a pairing token. Refused before any pairing call.
     await click("token-paste-pair");
@@ -52,13 +53,31 @@ test("Paste & Pair carries only the token, and refuses a clipboard that is not o
     );
     assert.match(byId("token-error").textContent, /not a pairing token/iu);
 
-    // Second clipboard: a real token. Pairs with the field's endpoint, not anything pasted.
+    // Second clipboard: a real token. The popup resolves the rendezvous endpoint itself.
     await click("token-paste-pair");
     await nextTurn();
     const pair = messages.find((message) => message.type === "popup.pair");
     assert.ok(pair, "Paste & Pair did not pair on a valid token");
     assert.equal(pair.token, validToken, "the token was not the trimmed clipboard value");
-    assert.equal(pair.endpoint, endpoint, "the endpoint did not come from the field");
+    assert.equal(pair.endpoint, endpoint, "the short code did not use the canonical rendezvous endpoint");
+  } finally {
+    restore();
+  }
+});
+
+test("a legacy 43-character pairing token remains accepted during migration", async () => {
+  const legacyToken = "a".repeat(43);
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state({ revision: 2, connected: true });
+  }, async () => legacyToken);
+  try {
+    await import(`../dist/popup/index.js?legacy-token=${String(Math.random())}`);
+    await nextTurn();
+    await click("token-paste-pair");
+    await nextTurn();
+    assert.equal(messages.find((message) => message.type === "popup.pair")?.token, legacyToken);
   } finally {
     restore();
   }
@@ -89,7 +108,7 @@ test("a pairing code discovers its Bridge port and sends only the raw token", as
   }
 });
 
-test("a pairing code pasted into the field discovers its Bridge port on submit", async () => {
+test("a pairing code pasted into the OTP discovers its Bridge port on submit", async () => {
   const messages = [];
   const restore = installGlobals(async (message) => {
     messages.push(message);
@@ -101,7 +120,7 @@ test("a pairing code pasted into the field discovers its Bridge port on submit",
     await import(`../dist/popup/index.js?routed-field-pair=${String(Math.random())}`);
     await nextTurn();
 
-    type("token", routedCode);
+    pastePairing(routedCode);
     byId("pairing-form").fire("submit");
     await nextTurn();
     const pair = messages.find((message) => message.type === "popup.pair");
@@ -113,15 +132,19 @@ test("a pairing code pasted into the field discovers its Bridge port on submit",
 });
 
 test("a failed routed pairing keeps the exact code and discovered port for retry", async () => {
+  const messages = [];
   const restore = installGlobals(
-    async (message) => message.type === "popup.pair"
-      ? state({
-        revision: 2,
-        connected: false,
-        endpoint: otherEndpoint,
-        error: "Could not connect to the Bachata VS Code extension",
-      })
-      : state(),
+    async (message) => {
+      messages.push(message);
+      return message.type === "popup.pair"
+        ? state({
+          revision: 2,
+          connected: false,
+          endpoint: otherEndpoint,
+          error: "Could not connect to the Bachata VS Code extension",
+        })
+        : state();
+    },
     async () => routedCode,
   );
   try {
@@ -130,8 +153,12 @@ test("a failed routed pairing keeps the exact code and discovered port for retry
 
     await click("token-paste-pair");
     await nextTurn();
-    assert.equal(byId("token").value, routedCode, "the failed attempt erased or rewrote the pairing code");
-    assert.equal(byId("endpoint").value, otherEndpoint, "the discovered port was lost after failure");
+    assert.equal(pairingValue(), validToken, "the failed attempt erased or rewrote the pairing code");
+    assert.equal(
+      messages.find((message) => message.type === "popup.pair")?.endpoint,
+      otherEndpoint,
+      "the routed code's discovered port was lost",
+    );
     assert.equal(byId("pair").hidden, false, "the retained code cannot be retried");
     assert.match(byId("connection-error").textContent, /Could not connect/iu);
   } finally {
@@ -149,7 +176,7 @@ test("a pairing code cannot carry an invalid or out-of-range port", async () => 
     await import(`../dist/popup/index.js?routed-invalid=${String(Math.random())}`);
     await nextTurn();
 
-    type("token", `v9.65536.${validToken}`);
+    pastePairing(`v9.65536.${validToken}`);
     byId("pairing-form").fire("submit");
     await nextTurn();
     assert.equal(messages.some((message) => message.type === "popup.pair"), false);
@@ -159,12 +186,7 @@ test("a pairing code cannot carry an invalid or out-of-range port", async () => 
   }
 });
 
-/**
- * The prefill is the half that makes one paste enough, so it has to be proven against a background
- * that reports no endpoint at all — the state a Bridge is in before it has ever paired. A fixture
- * that supplies the endpoint would assert nothing about the prefill.
- */
-test("with no endpoint from the background, the canonical one is offered and used", async () => {
+test("with no endpoint from the background, the canonical rendezvous is used invisibly", async () => {
   const messages = [];
   const withoutEndpoint = (overrides = {}) => {
     const { endpoint: omitted, ...rest } = state(overrides);
@@ -181,13 +203,8 @@ test("with no endpoint from the background, the canonical one is offered and use
     await import(`../dist/popup/index.js?paste-pair-noendpoint=${String(Math.random())}`);
     await nextTurn();
 
-    assert.equal(
-      byId("endpoint").value,
-      endpoint,
-      "an unpaired Bridge did not offer the canonical endpoint",
-    );
-    // The placeholder is the same constant, so the two cannot drift apart.
-    assert.equal(byId("endpoint").placeholder, endpoint);
+    assert.equal(byId("endpoint"), null);
+    assert.equal(byId("connection-advanced"), null);
 
     await click("token-paste-pair");
     await nextTurn();
@@ -200,57 +217,24 @@ test("with no endpoint from the background, the canonical one is offered and use
   }
 });
 
-/**
- * BB-R26-03. The endpoint the reader sees is the endpoint that pairs. A clipboard read is async and
- * the endpoint field stays editable while it waits, so an endpoint edited during the read must not
- * be pre-empted by the endpoint the field held when Paste & Pair was pressed. The deferred clipboard
- * resolves only after the edit, and the pairing that captured the old endpoint is refused rather than
- * sent to it.
- */
-test("Paste & Pair refuses to pair an endpoint edited while the clipboard was read", async () => {
-  const clipboard = deferred();
-  const messages = [];
-  const restore = installGlobals(
-    async (message) => {
-      messages.push(message);
-      return state({ revision: 2, connected: true });
-    },
-    async () => clipboard.promise,
-  );
-  try {
-    await import(`../dist/popup/index.js?paste-pair-endpoint-edit=${String(Math.random())}`);
-    await nextTurn();
-
-    byId("token-paste-pair").fire("click");
-    // The reader retargets the Bridge to a different loopback port before the clipboard resolves.
-    type("endpoint", otherEndpoint);
-    clipboard.resolve(validToken);
-    await nextTurn();
-
-    assert.equal(
-      messages.some((message) => message.type === "popup.pair"),
-      false,
-      "a stale Paste & Pair paired after the endpoint was edited",
-    );
-    assert.equal(byId("endpoint").value, otherEndpoint, "the edited endpoint was overwritten");
-  } finally {
-    restore();
-  }
-});
-
-test("pairing keeps the token separate from actions and exposes one primary action", async () => {
+test("pairing uses an accessible four-cell OTP and exposes one primary action", async () => {
   const restore = installGlobals(async () => state({ connected: false }), async () => "");
   try {
     await import(`../dist/popup/index.js?token-layout=${String(Math.random())}`);
     await nextTurn();
-    const input = byId("token");
-    const field = input.parent;
-    assert.equal(field.children.filter((child) => child.tagName === "INPUT").length, 1);
-    assert.equal(field.children.filter((child) => child.tagName === "BUTTON").length, 0,
-      "action buttons must not share the token input's row");
-    assert.equal(input.getAttribute("aria-describedby"), "token-hint token-error");
-    assert.equal(byId("token-reveal").getAttribute("aria-controls"), input.id);
-    for (const id of ["token-paste", "token-paste-pair", "token-reveal"]) {
+    const group = byId("token-inputs");
+    const inputs = group.querySelectorAll("input");
+    assert.equal(inputs.length, 4);
+    assert.equal(group.getAttribute("role"), "group");
+    assert.equal(group.getAttribute("aria-labelledby"), "token-label");
+    assert.match(byId("token-hint").textContent, /remains valid until used or reset/iu);
+    inputs.forEach((input, index) => {
+      assert.equal(input.maxLength, 1);
+      assert.equal(input.inputMode, "numeric");
+      assert.equal(input.getAttribute("aria-describedby"), "token-hint token-error");
+      assert.equal(input.getAttribute("aria-label"), `Pairing code digit ${index + 1} of 4`);
+    });
+    for (const id of ["token-paste", "token-paste-pair"]) {
       assert.equal(byId(id).type, "button");
       assert.ok(byId(id).textContent.trim());
     }
@@ -258,76 +242,69 @@ test("pairing keeps the token separate from actions and exposes one primary acti
       .filter((button) => button.classList.contains("primary") && !button.hidden);
     assert.deepEqual(primary().map((button) => button.id), ["token-paste-pair"]);
     assert.equal(byId("token-paste-pair").disabled, false);
-    type("token", "typed-token");
+    typePairing(validToken);
     assert.deepEqual(primary().map((button) => button.id), ["pair"]);
     assert.equal(byId("pair").disabled, false);
-    await click("token-reveal");
-    assert.equal(byId("token-reveal").getAttribute("aria-pressed"), "true");
-    assert.equal(input.type, "text");
-    await click("token-reveal");
-    assert.equal(byId("token-reveal").getAttribute("aria-pressed"), "false");
-    assert.equal(input.type, "password");
-    type("token", "");
+    typePairing("");
     assert.deepEqual(primary().map((button) => button.id), ["token-paste-pair"]);
   } finally {
     restore();
   }
 });
 
-test("advanced connection settings stay optional but expose an invalid loaded address", async () => {
-  const customEndpoint = "ws://127.0.0.1:50087/bachata-browser-bridge-v9";
-  const messages = [];
-  let clipboardReads = 0;
-  const restore = installGlobals(async (message) => {
-    messages.push(message);
-    return state({ endpoint: customEndpoint });
-  }, async () => {
-    clipboardReads += 1;
-    return "a".repeat(43);
-  });
+test("the OTP advances, filters input, pastes a whole code, and navigates backward", async () => {
+  const restore = installGlobals(async () => state({ connected: false }));
   try {
-    await import(`../dist/popup/index.js?advanced-settings=${String(Math.random())}`);
+    await import(`../dist/popup/index.js?otp-behavior=${String(Math.random())}`);
     await nextTurn();
-    const advanced = byId("connection-advanced");
-    const input = byId("endpoint");
-    assert.equal(advanced.tagName, "DETAILS");
-    assert.equal(advanced.children[0].tagName, "SUMMARY");
-    assert.equal(advanced.open, false);
-    assert.equal(input.value, customEndpoint);
-    assert.equal(input.getAttribute("aria-invalid"), "false");
-    advanced.open = true;
-    input.focus();
-    type("endpoint", "wss://untrusted.example/bridge");
-    assert.equal(advanced.open, true);
-    assert.equal(document.activeElement, input);
-    assert.equal(input.getAttribute("aria-invalid"), "true");
-    assert.match(input.getAttribute("aria-describedby"), /endpoint-error/);
-    assert.equal(byId("endpoint-error").hidden, false);
-    assert.equal(byId("token-paste-pair").disabled, true);
-    type("endpoint", customEndpoint);
-    assert.equal(input.getAttribute("aria-invalid"), "false");
-    assert.equal(advanced.open, true, "state updates must preserve an expanded settings section");
-    type("endpoint", "   ");
-    assert.equal(byId("token-paste-pair").disabled, true);
-    byId("token-paste-pair").fire("click");
-    await nextTurn();
-    assert.equal(clipboardReads, 0, "an empty endpoint must not consume clipboard contents");
-    assert.equal(messages.some((message) => message.type === "popup.pair"), false);
-    type("endpoint", customEndpoint);
-    assert.equal(byId("token-paste-pair").disabled, false);
+
+    byId("token-1").focus();
+    type("token-1", "5");
+    assert.equal(document.activeElement.id, "token-2");
+    type("token-2", "x");
+    assert.equal(pairingValue(), "5");
+    assert.equal(document.activeElement.id, "token-2");
+
+    pastePairing("5745", 2);
+    assert.equal(pairingValue(), "5745");
+    assert.equal(document.activeElement.id, "token-4");
+    assert.equal(byId("pair").disabled, false);
+
+    type("token-4", "");
+    byId("token-4").focus();
+    byId("token-4").fire("keydown", { key: "Backspace" });
+    assert.equal(document.activeElement.id, "token-3");
+    assert.equal(pairingValue(), "57");
+
+    byId("token-3").fire("keydown", { key: "ArrowLeft" });
+    assert.equal(document.activeElement.id, "token-2");
+    byId("token-2").fire("keydown", { key: "ArrowRight" });
+    assert.equal(document.activeElement.id, "token-3");
   } finally {
     restore();
   }
+});
 
-  const restoreInvalid = installGlobals(async () => state({ endpoint: "ws://untrusted.example/bridge" }));
+test("a short code ignores a stale saved port and exposes no URL controls", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return message.type === "popup.pair"
+      ? state({ revision: 2, connected: true, endpoint })
+      : state({ endpoint: otherEndpoint });
+  });
   try {
-    await import(`../dist/popup/index.js?invalid-settings=${String(Math.random())}`);
+    await import(`../dist/popup/index.js?stale-endpoint-hidden=${String(Math.random())}`);
     await nextTurn();
-    assert.equal(byId("connection-advanced").open, true);
-    assert.equal(byId("endpoint-error").hidden, false);
-    assert.equal(byId("token-paste-pair").disabled, true);
+    assert.equal(byId("endpoint"), null);
+    assert.equal(byId("connection-advanced"), null);
+    typePairing(validToken);
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    const pair = messages.find((message) => message.type === "popup.pair");
+    assert.deepEqual(pair, { type: "popup.pair", endpoint, token: validToken });
   } finally {
-    restoreInvalid();
+    restore();
   }
 });
 
