@@ -246,7 +246,7 @@ test("popup keeps pairing drafts locally and exposes exact provider readiness", 
   for (const marker of [
     "let endpointDraft",
     "let tokenDraft",
-    "dom.endpointInput !== document.activeElement",
+    "document.activeElement !== input",
     "endpointDirty",
     "conversationIdentity",
     "tab.status",

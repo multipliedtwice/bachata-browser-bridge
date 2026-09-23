@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.1 — Four-digit pairing code
+
+- Pairing now uses a four-digit one-time code, typed or pasted into four digit fields. A code
+  that includes the Bachata port (`v9.<port>.<code>`) is still accepted, and so is the former
+  43-character token, so a Bachata build that issues either format pairs.
+
 ## 0.7.0 — Recoverable browser conversations
 
 - Added a durable, bounded conversation registry so Bachata can reopen an exact ChatGPT or Claude
