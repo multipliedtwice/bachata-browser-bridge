@@ -854,6 +854,26 @@ test("an end-of-turn control counts only inside the turn holding the bound respo
   );
 });
 
+test("ChatGPT section turns scope the response control away from the user's Copy message", () => {
+  const dom = createGenericDom(`
+    <section data-testid="conversation-turn-1">
+      <div data-message-author-role="user" id="user"></div>
+      <button data-testid="copy-turn-action-button" aria-label="Copy message"></button>
+    </section>
+    <section data-testid="conversation-turn-2">
+      <div data-message-author-role="assistant" id="answered"></div>
+      <button data-testid="copy-turn-action-button" aria-label="Copy response"></button>
+    </section>
+    <section data-testid="conversation-turn-3">
+      <div data-message-author-role="assistant" id="answering"></div>
+    </section>
+  `);
+  assert.equal(chatGptTurnIdentity(dom.query("#answered")), "conversation-turn-2");
+  assert.equal(chatGptTurnIdentity(dom.query("#answering")), "conversation-turn-3");
+  assert.equal(chatGptCompletionActionVisible({ response: dom.query("#answered"), isVisible: visibleAlways }), true);
+  assert.equal(chatGptCompletionActionVisible({ response: dom.query("#answering"), isVisible: visibleAlways }), false);
+});
+
 test("an end-of-turn control nobody can see is not evidence", () => {
   const dom = conversationDom();
   assert.equal(
@@ -3878,6 +3898,11 @@ test("response activity is measured from the node the answer is being read from"
     activity.bind(first);
     assert.equal(activity.lastMutationAt(), 200);
     assert.equal(fakeMutationObservers.length, 1);
+    assert.deepEqual(fakeMutationObservers[0].targets[0].options, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     fakeMutationObservers[0].fire();
     assert.equal(activity.lastMutationAt(), 300);
     // A replacement is a fresh reading, so the quiet clock starts again with it.

@@ -4015,16 +4015,16 @@ const runChatGptCaptureEntry = async ({
     dom.sendButton().addEventListener("click", () => {
       const thread = dom.thread();
       thread.appendChild(dom.html(
-        `<article data-testid="conversation-turn-1">`
+        `<section data-testid="conversation-turn-1">`
         + `<div data-message-author-role="user" data-message-id="user-1">hello</div>`
-        + `</article>`,
+        + `</section>`,
       ));
       thread.appendChild(dom.html(
-        `<article data-testid="conversation-turn-2">`
+        `<section data-testid="conversation-turn-2">`
         + `<div data-message-author-role="assistant"${
           responseMessageId ? ` data-message-id="${responseMessageId}"` : ""
         }></div>`
-        + `</article>`,
+        + `</section>`,
       ));
       const stop = dom.html(`<button data-testid="stop-button"></button>`);
       stop.addEventListener("click", () => {
@@ -4034,7 +4034,7 @@ const runChatGptCaptureEntry = async ({
       dom.query("form").appendChild(stop);
       // The exact nodes the completion-evidence path would serialize if it were active.
       dom.countInnerHtml(dom.query("[data-message-author-role='assistant']"));
-      dom.countInnerHtml(dom.query("article[data-testid='conversation-turn-2']"));
+      dom.countInnerHtml(dom.query("section[data-testid='conversation-turn-2']"));
       if (readerFault) {
         dom.failInnerText(
           dom.query("[data-message-author-role='assistant']"),
@@ -4093,14 +4093,42 @@ const runChatGptCaptureEntry = async ({
 // Generation runs for `busyMs` so the adapter observes the lifecycle it requires, then the answer
 // lands and Stop disappears. Turns that spend their first observations on injected faults need a
 // generation long enough to still be seen, exactly as a real one would be.
+const showCompletedAction = (dom) => {
+  dom.query("section[data-testid='conversation-turn-2']")?.appendChild(
+    dom.html(`<button data-testid="copy-turn-action-button" aria-label="Copy response"></button>`),
+  );
+};
+
 const settleAnswerAfter = (busyMs) => async ({ dom, answer }) => {
   await sleep(busyMs);
   dom.query("[data-message-author-role='assistant']").textContent = answer;
   await sleep(20);
   dom.query("button[data-testid='stop-button']")?.remove();
+  showCompletedAction(dom);
 };
 
 const settleAnswer = settleAnswerAfter(20);
+
+const settleAnswerWithHiddenStop = async ({ dom, answer }) => {
+  await sleep(20);
+  dom.query("[data-message-author-role='assistant']").textContent = answer;
+  await sleep(20);
+  dom.query("button[data-testid='stop-button']")?.setAttribute("hidden", "");
+  showCompletedAction(dom);
+};
+
+const settleAnswerWithCollapsedStop = async ({ dom, answer }) => {
+  await sleep(20);
+  dom.query("[data-message-author-role='assistant']").textContent = answer;
+  await sleep(20);
+  dom.query("button[data-testid='stop-button']").bachataRect = {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  };
+  showCompletedAction(dom);
+};
 
 // One settled turn, read by both the completion assertions and the dormancy assertions. The run
 // installs its own globals and restores them, so it happens inside a test rather than at import.
@@ -4121,12 +4149,32 @@ test("production ChatGPT capture answers a settled turn through the real DOM", a
   assert.equal(capture.quarantined.length, 0);
 });
 
-test("production ChatGPT capture reads nothing extra while the terminal control is unproven", async () => {
-  // Gate / L1 keeps the completion-evidence path dormant, and dormant has to mean absent: no turn
-  // observer, no candidate state, and no answer serialized on every poll of every turn.
+test("production ChatGPT capture treats a retained hidden Stop control as idle", async () => {
+  const capture = await runChatGptCaptureEntry({
+    answer: "answer with retained hidden stop",
+    settle: settleAnswerWithHiddenStop,
+  });
+  assert.equal(capture.submitted.submitted, true, JSON.stringify(capture.submitted));
+  assert.equal(capture.terminal?.type, "content.response", JSON.stringify(capture.terminal));
+  assert.equal(capture.terminal.response.text.includes("answer with retained hidden stop"), true);
+  assert.equal(capture.stopClicks, 0);
+});
+
+test("production ChatGPT capture treats a retained collapsed Stop control as idle", async () => {
+  const capture = await runChatGptCaptureEntry({
+    answer: "answer with retained collapsed stop",
+    settle: settleAnswerWithCollapsedStop,
+  });
+  assert.equal(capture.submitted.submitted, true, JSON.stringify(capture.submitted));
+  assert.equal(capture.terminal?.type, "content.response", JSON.stringify(capture.terminal));
+  assert.equal(capture.terminal.response.text.includes("answer with retained collapsed stop"), true);
+  assert.equal(capture.stopClicks, 0);
+});
+
+test("production ChatGPT capture scopes completion to the assistant section without serializing it", async () => {
   const capture = await captureSettledTurn();
-  assert.equal(capture.innerHtmlReads, 0, "the disabled path serialized the response");
-  assert.equal(capture.observedTurns, 0, "the disabled path observed the turn container");
+  assert.equal(capture.innerHtmlReads, 0, "completion serialized the response");
+  assert.equal(capture.observedTurns > 0, true, "completion did not observe the assistant turn");
   assert.equal(capture.terminal?.type, "content.response");
 });
 
@@ -4185,6 +4233,7 @@ test("production ChatGPT keeps its connected response when the provider duplicat
     ));
     await sleep(20);
     dom.query("button[data-testid='stop-button']")?.remove();
+    showCompletedAction(dom);
   };
   const { terminal } = await runChatGptCaptureEntry({
     answer: "connected response",
@@ -4199,7 +4248,7 @@ test("production ChatGPT stops generation when response capture fails", async ()
     await sleep(20);
     const response = dom.query("[data-message-author-role='assistant']");
     response.remove();
-    const turn = dom.query("article[data-testid='conversation-turn-2']");
+    const turn = dom.query("section[data-testid='conversation-turn-2']");
     turn.appendChild(dom.html(
       `<div data-message-author-role="assistant" data-message-id="assistant-1">first</div>`,
     ));
@@ -4285,6 +4334,7 @@ test("production ChatGPT capture gives a rebound response its own reader budget"
   const replacing = async ({ dom }) => {
     await sleep(2_000);
     dom.query("button[data-testid='stop-button']")?.remove();
+    showCompletedAction(dom);
   };
   const { terminal, clicks, quarantined } = await runChatGptCaptureEntry({
     answer: "answered after the rebind",
@@ -4341,6 +4391,7 @@ test("production ChatGPT capture gives a partially committed replacement its own
   const replacing = async ({ dom }) => {
     await sleep(2_000);
     dom.query("button[data-testid='stop-button']")?.remove();
+    showCompletedAction(dom);
   };
   const { terminal, clicks, quarantined } = await runChatGptCaptureEntry({
     answer: "answered after the partial commit",
@@ -5445,6 +5496,41 @@ test("production background drops a registered document when its tab navigates a
       })).success,
       false,
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+test("a pending first turn accepts the tab route while the active frame route is stale", async () => {
+  const harness = await registeredDocumentHarness("first-turn-tab-route", {
+    providerUrl: "https://chatgpt.com/",
+  });
+  try {
+    const socket = await harness.pair();
+    const selected = await startCreatedRecoveryTurn(harness, socket, false);
+    const assignedUrl = "https://chatgpt.com/c/tab-route";
+    harness.setProviderFrameUrl(harness.providerUrl);
+    harness.setProviderTabs([{ id: 31, url: assignedUrl, title: "assigned" }]);
+    const assignedSender = {
+      ...harness.contentSender,
+      tab: { ...harness.contentSender.tab, url: assignedUrl },
+      url: assignedUrl,
+    };
+    assert.deepEqual(
+      await harness.fromContent({
+        type: "content.transition",
+        submissionCommitted: true,
+        requestId: "recovery-turn",
+        agentId: "agent-1",
+        sessionId: selected.sessionId,
+        documentToken: harness.documentToken,
+        previousConversationUrl: harness.providerUrl,
+        conversationUrl: assignedUrl,
+        conversationIdentity: `chatgpt:${assignedUrl}`,
+      }, assignedSender),
+      { success: true, accepted: true },
+    );
+    assert.ok(socket.sent.some((frame) => frame.type === "conversation.binding"));
   } finally {
     harness.restore();
   }

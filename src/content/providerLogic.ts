@@ -2330,7 +2330,7 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
   /**
    * BB-4. Whether the bound response is still changing.
    *
-   * Quiet is measured from the last mutation inside the response node, so the node the answer is
+   * Quiet is measured from content mutations inside the response node, so the node the answer is
    * being read from has to be the node being watched: a provider that replaces the node mid-turn
    * must re-bind, and re-binding resets the clock because a replacement is a fresh reading rather
    * than a continuation of the old one.
@@ -2357,7 +2357,6 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
           childList: true,
           subtree: true,
           characterData: true,
-          attributes: true,
         });
       },
       touch: () => {

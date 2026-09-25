@@ -353,6 +353,7 @@ const chatGptCompletionActionSelectors = [
   "button[data-testid='copy-turn-action-button']",
 ];
 const chatGptTurnContainerSelectors = [
+  "section[data-testid^='conversation-turn-']",
   "article[data-testid^='conversation-turn-']",
 ];
 

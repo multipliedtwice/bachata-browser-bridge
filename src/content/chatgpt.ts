@@ -159,11 +159,9 @@ const requiredQuietMs = 2_500;
 // than any turn deadline. Expiry is a DOM-drift error, not a completion, because quiet time is
 // not evidence a turn ended.
 const stoppedWithoutActionGraceMs = 2_000;
-// Gate / L1. The response-scoped terminal control has not been observed on an authenticated
-// ChatGPT page by this project, and an upstream selector is not that evidence. Until L1 is
-// recorded this adapter supplies no completion-action evidence, so the shared lifecycle rule
-// decides exactly as it did before. Flipping this on without L1 would redefine C1 silently.
-const chatGptTerminalControlProven = false;
+// Authenticated ChatGPT Chat renders a Copy response control inside the completed assistant
+// section[data-testid^='conversation-turn-']; a user turn has a separate Copy message control.
+const chatGptTerminalControlProven = true;
 // Consecutive reader faults tolerated inside one turn's observation step. The turn is already
 // accepted by ChatGPT when this loop runs, and no failure here may resend it.
 const maximumObservationFaults = 8;
@@ -194,6 +192,20 @@ const queryUnique = <T extends Element>(selectors: string[]): T | undefined =>
     ),
   );
 
+const controlIsVisible = (element: HTMLElement): boolean => {
+  if (!element.isConnected) return false;
+  if (element.closest('[hidden], [aria-hidden="true"]') !== null) return false;
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+      return false;
+    }
+  }
+  if (typeof element.getBoundingClientRect !== "function") return true;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+
 const healedControls = (): BachataDomHealingSelection | undefined =>
   bachataDomHealing.cached("chatgpt");
 
@@ -223,11 +235,15 @@ const sendButton = (): HTMLElement | undefined => {
 };
 
 const stopButton = (): HTMLElement | undefined => {
+  const healed = healedControls()?.stopButton;
   try {
-    return queryUnique<HTMLButtonElement>(stopSelectors) ?? healedControls()?.stopButton;
+    return uniqueItem(
+      stopSelectors.flatMap((selector) =>
+        Array.from(document.querySelectorAll<HTMLButtonElement>(selector)),
+      ).filter(controlIsVisible),
+    ) ?? (healed && controlIsVisible(healed) ? healed : undefined);
   } catch (cause) {
-    const healed = healedControls()?.stopButton;
-    if (healed) return healed;
+    if (healed && controlIsVisible(healed)) return healed;
     throw cause;
   }
 };
@@ -309,19 +325,7 @@ type AlertSourceOptions = {
 // and a control nobody can see is not evidence the provider finished its turn.
 const elementIsVisible = (element: BachataChatGptAlertElement): boolean => {
   if (!(element instanceof HTMLElement)) return true;
-  if (!element.isConnected) return false;
-  if (element.closest('[hidden], [aria-hidden="true"]') !== null) return false;
-  for (
-    let node: HTMLElement | null = element;
-    node;
-    node = node.parentElement
-  ) {
-    const style = getComputedStyle(node);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
-      return false;
-    }
-  }
-  return true;
+  return controlIsVisible(element);
 };
 
 // One observer over the composer form, stamping a revision on any alert region it sees touched.
@@ -864,7 +868,6 @@ const captureResponse = async (
       childList: true,
       subtree: true,
       characterData: true,
-      attributes: true,
     });
   };
   try {

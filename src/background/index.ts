@@ -2174,9 +2174,14 @@ const popupState = async (): Promise<PopupState> =>
 const currentSenderBinding = async (
   sender: chrome.runtime.MessageSender,
   documentToken: unknown,
+  preferredConversationIdentity?: string,
 ): Promise<DocumentBinding | undefined> => {
   const injectedBinding = senderBinding(sender, documentToken);
   if (!injectedBinding) return undefined;
+  // Brave and Chrome can update the top-level tab and active-frame route in either order for a
+  // same-document navigation. Both are browser-vouched; prefer the one that matches the exact
+  // request or message identity instead of stranding a turn behind whichever API stayed stale.
+  let frameBinding: DocumentBinding | undefined;
   let frame: Awaited<ReturnType<typeof chrome.webNavigation.getFrame>> | undefined;
   try {
     frame = await chrome.webNavigation.getFrame({
@@ -2190,11 +2195,25 @@ const currentSenderBinding = async (
     frame?.documentLifecycle === "active" &&
     (injectedBinding.documentId === undefined || frame.documentId === injectedBinding.documentId)
   ) {
-    const frameBinding = senderBindingAtUrl(injectedBinding, frame.url);
-    if (frameBinding) return frameBinding;
+    frameBinding = senderBindingAtUrl(injectedBinding, frame.url);
+    if (
+      frameBinding &&
+      (preferredConversationIdentity === undefined ||
+        frameBinding.conversationIdentity === preferredConversationIdentity)
+    ) {
+      return frameBinding;
+    }
   }
   const tab = await chrome.tabs.get(injectedBinding.tabId).catch(() => undefined);
-  return senderBindingAtUrl(injectedBinding, tab?.url);
+  const tabBinding = senderBindingAtUrl(injectedBinding, tab?.url);
+  if (
+    tabBinding &&
+    (preferredConversationIdentity === undefined ||
+      tabBinding.conversationIdentity === preferredConversationIdentity)
+  ) {
+    return tabBinding;
+  }
+  return frameBinding ?? tabBinding;
 };
 
 const transitionBindingWaitMs = 2_000;
@@ -2205,7 +2224,6 @@ const awaitTransitionSenderBinding = async (
   sender: chrome.runtime.MessageSender,
   request: ActiveRequest | undefined,
 ): Promise<DocumentBinding | undefined> => {
-  let binding = await currentSenderBinding(sender, message.documentToken);
   const injectedBinding = senderBinding(sender, message.documentToken);
   const claimedBinding = injectedBinding
     ? senderBindingAtUrl(injectedBinding, message.conversationUrl)
@@ -2216,6 +2234,14 @@ const awaitTransitionSenderBinding = async (
     message,
     supportedTransition: isSupportedInitialTransition,
   });
+  const preferredConversationIdentity = claimedAdmission.admitted
+    ? claimedAdmission.conversationIdentity
+    : undefined;
+  let binding = await currentSenderBinding(
+    sender,
+    message.documentToken,
+    preferredConversationIdentity,
+  );
   if (!claimedAdmission.admitted) return binding;
   const deadline = Math.min(request?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + transitionBindingWaitMs);
   while (
@@ -2223,7 +2249,11 @@ const awaitTransitionSenderBinding = async (
     Date.now() < deadline
   ) {
     await new Promise((resolve) => setTimeout(resolve, transitionBindingPollMs));
-    binding = await currentSenderBinding(sender, message.documentToken);
+    binding = await currentSenderBinding(
+      sender,
+      message.documentToken,
+      preferredConversationIdentity,
+    );
   }
   return binding;
 };
@@ -2233,7 +2263,11 @@ const validActiveSender = async (
   sender: chrome.runtime.MessageSender,
 ): Promise<ActiveRequest | undefined> => {
   const request = activeRequests.get(String(message.requestId));
-  const binding = await currentSenderBinding(sender, message.documentToken);
+  const binding = await currentSenderBinding(
+    sender,
+    message.documentToken,
+    request?.conversationIdentity,
+  );
   if (!request || !binding || !activeRequestMatchesSender(request, binding, message)) {
     return undefined;
   }
@@ -2323,7 +2357,11 @@ const validAssetSender = async (
   sender: chrome.runtime.MessageSender,
 ): Promise<ActiveAssetTransfer | undefined> => {
   const transfer = activeAssetTransfers.get(String(input.transferId));
-  const binding = await currentSenderBinding(sender, input.documentToken);
+  const binding = await currentSenderBinding(
+    sender,
+    input.documentToken,
+    transfer?.binding.conversationIdentity,
+  );
   if (
     !transfer ||
     transfer.assetId !== input.assetId ||
@@ -2355,7 +2393,13 @@ chrome.runtime.onMessage.addListener(
       }
       const input = message as Record<string, unknown>;
       if (input.type === "content.register") {
-        const binding = await currentSenderBinding(sender, input.documentToken);
+        const binding = await currentSenderBinding(
+          sender,
+          input.documentToken,
+          typeof input.conversationIdentity === "string"
+            ? input.conversationIdentity
+            : undefined,
+        );
         if (
           !binding ||
           canonicalConversationUrl(binding.provider, String(input.conversationUrl)) !==
