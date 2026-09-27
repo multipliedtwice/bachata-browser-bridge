@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.7.2 — Conversation capture and pairing reliability
+
+- Stabilized ChatGPT conversation capture and promotion while a new chat receives its permanent URL.
+- Improved pairing state checks and added focused production-path coverage.
+
 ## 0.7.1 — Four-digit pairing code
 
 - Pairing now uses a four-digit one-time code, typed or pasted into four digit fields. A code
