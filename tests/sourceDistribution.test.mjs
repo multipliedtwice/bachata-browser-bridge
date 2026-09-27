@@ -133,7 +133,7 @@ const buildCaseTree = async (base, outside, testCase) => {
   await symlink(path.join(base, "absent-target"), target);
 };
 
-test("the exporter applies every shared exclusion case by name before type", async () => {
+test("the exporter applies every shared exclusion case by name before type", async (t) => {
   for (const testCase of fixtures.cases) {
     const parent = await scratchRoot("bachata-browser-export-case-");
     const source = path.join(parent, "package");
@@ -142,7 +142,14 @@ test("the exporter applies every shared exclusion case by name before type", asy
       await writeFile(path.join(source, "package.json"), JSON.stringify({ name: "bachata-browser-bridge" }));
       await writeFile(path.join(source, "README.md"), "# fixture\n");
       await writeFile(path.join(source, "src", "index.ts"), "export const value = 1;\n");
-      await buildCaseTree(source, parent, testCase);
+      try {
+        await buildCaseTree(source, parent, testCase);
+      } catch (error) {
+        if (process.platform !== "win32" || error?.code !== "EPERM"
+          || !["symlink", "broken-symlink"].includes(testCase.type)) throw error;
+        t.diagnostic(`${testCase.name}: Windows denied symbolic-link creation; fixture not exercised`);
+        continue;
+      }
 
       const collected = collectMaintainedSourceFiles(source);
       if (testCase.rejected) {

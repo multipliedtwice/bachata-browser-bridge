@@ -753,6 +753,13 @@ test("production background entry initializes and serves popup state through its
       token: "pairing-token",
     });
     assert.equal(pairing.connecting, true);
+    const repeatedPairing = await dispatchRuntimeMessage(runtimeEvent.listeners[0], {
+      type: "popup.pair",
+      endpoint: "ws://127.0.0.1:43123/bachata-browser-bridge-v9",
+      token: "pairing-token",
+    });
+    assert.equal(repeatedPairing.connecting, true);
+    assert.equal(sockets.length, 1, "the pending one-use code opened a second socket");
     const firstSocket = sockets[0];
     firstSocket.readyState = FakeWebSocket.OPEN;
     firstSocket.emit("open");
@@ -769,6 +776,14 @@ test("production background entry initializes and serves popup state through its
     });
     await nextTurn();
     await nextTurn();
+
+    const repeatedAfterConnected = await dispatchRuntimeMessage(runtimeEvent.listeners[0], {
+      type: "popup.pair",
+      endpoint: "ws://127.0.0.1:43123/bachata-browser-bridge-v9",
+      token: "pairing-token",
+    });
+    assert.equal(repeatedAfterConnected.connected, true);
+    assert.equal(sockets.length, 1, "the consumed code replaced an authenticated socket");
 
     // An asset the entry never registered cannot be revealed, and saying so is the answer.
     firstSocket.emit("message", {
@@ -3961,6 +3976,8 @@ const runChatGptCaptureEntry = async ({
   waitMs = 20_000,
   readerFault,
   responseMessageId = "assistant-1",
+  modernControls = false,
+  modernTurns = false,
 }) => {
   const names = [
     "window", "document", "location", "history", "Node", "Element", "HTMLElement",
@@ -3972,7 +3989,14 @@ const runChatGptCaptureEntry = async ({
     "__pairChatGptLogic", "__pairBrowserBridgeChatGptV6",
   ];
   const saved = saveGlobals(names);
-  const dom = createChatGptCaptureDom();
+  const dom = createChatGptCaptureDom(modernControls ? { body: `
+    <main><div id="thread"></div>
+      <form data-chatgpt-composer="">
+        <div contenteditable="true" role="textbox" aria-label="Ask ChatGPT" data-composer-markdown=""></div>
+        <button type="submit" aria-label="Send"></button>
+      </form>
+    </main>
+  ` } : {});
   let aborted = false;
   let settled = false;
   let clicks = 0;
@@ -4014,27 +4038,43 @@ const runChatGptCaptureEntry = async ({
     // rendering until the test says the answer is settled.
     dom.sendButton().addEventListener("click", () => {
       const thread = dom.thread();
-      thread.appendChild(dom.html(
-        `<section data-testid="conversation-turn-1">`
-        + `<div data-message-author-role="user" data-message-id="user-1">hello</div>`
-        + `</section>`,
-      ));
-      thread.appendChild(dom.html(
-        `<section data-testid="conversation-turn-2">`
-        + `<div data-message-author-role="assistant"${
-          responseMessageId ? ` data-message-id="${responseMessageId}"` : ""
-        }></div>`
-        + `</section>`,
-      ));
-      const stop = dom.html(`<button data-testid="stop-button"></button>`);
+      if (modernTurns) {
+        thread.appendChild(dom.html(
+          `<div class="group flex flex-col pb-2 pt-2">`
+          + `<div class="flex flex-col gap-3">`
+          + `<div data-chatgpt-search-unit-key="fallback-turn-0:0:user" data-chatgpt-search-message-ids="user-1">`
+          + `<div data-user-message-bubble="true">hello</div></div>`
+          + `<div data-chatgpt-search-unit-key="fallback-turn-0:1:assistant" data-chatgpt-search-message-ids="assistant-1 assistant-1">`
+          + `<div data-chatgpt-selection-message-id="assistant-1"><div data-markdown-text-style="assistant-message"></div></div></div>`
+          + `</div><div class="turn-action-controls"></div></div>`,
+        ));
+      } else {
+        thread.appendChild(dom.html(
+          `<section data-testid="conversation-turn-1">`
+          + `<div data-message-author-role="user" data-message-id="user-1">hello</div>`
+          + `</section>`,
+        ));
+        thread.appendChild(dom.html(
+          `<section data-testid="conversation-turn-2">`
+          + `<div data-message-author-role="assistant"${
+            responseMessageId ? ` data-message-id="${responseMessageId}"` : ""
+          }></div>`
+          + `</section>`,
+        ));
+      }
+      const stop = dom.html(modernControls
+        ? `<button aria-label="Stop"></button>`
+        : `<button data-testid="stop-button"></button>`);
       stop.addEventListener("click", () => {
         stopClicks += 1;
         stop.remove();
       });
       dom.query("form").appendChild(stop);
       // The exact nodes the completion-evidence path would serialize if it were active.
-      dom.countInnerHtml(dom.query("[data-message-author-role='assistant']"));
-      dom.countInnerHtml(dom.query("section[data-testid='conversation-turn-2']"));
+      dom.countInnerHtml(dom.query(modernTurns
+        ? "[data-markdown-text-style='assistant-message']" : "[data-message-author-role='assistant']"));
+      dom.countInnerHtml(dom.query(modernTurns
+        ? "div.group.pb-2.pt-2" : "section[data-testid='conversation-turn-2']"));
       if (readerFault) {
         dom.failInnerText(
           dom.query("[data-message-author-role='assistant']"),
@@ -4147,6 +4187,41 @@ test("production ChatGPT capture answers a settled turn through the real DOM", a
   assert.equal(capture.terminal?.type, "content.response", JSON.stringify(capture.terminal));
   assert.equal(capture.terminal.response.text.includes("the settled answer"), true);
   assert.equal(capture.quarantined.length, 0);
+});
+
+test("production ChatGPT capture uses the current composer and Send controls", async () => {
+  const capture = await runChatGptCaptureEntry({
+    answer: "current composer answer",
+    modernControls: true,
+    settle: async ({ dom, answer }) => {
+      await sleep(20);
+      dom.query("[data-message-author-role='assistant']").textContent = answer;
+      await sleep(20);
+      dom.query("form[data-chatgpt-composer] button[aria-label='Stop']")?.remove();
+      showCompletedAction(dom);
+    },
+  });
+  assert.equal(capture.submitted.submitted, true, JSON.stringify(capture.submitted));
+  assert.equal(capture.terminal?.type, "content.response", JSON.stringify(capture.terminal));
+  assert.equal(capture.terminal.response.text.includes("current composer answer"), true);
+});
+
+test("production ChatGPT capture recognizes the current user and assistant turn markup", async () => {
+  const capture = await runChatGptCaptureEntry({
+    answer: "OK",
+    modernControls: true,
+    modernTurns: true,
+    settle: async ({ dom, answer }) => {
+      await sleep(20);
+      dom.query("[data-markdown-text-style='assistant-message']").textContent = answer;
+      await sleep(20);
+      dom.query("form[data-chatgpt-composer] button[aria-label='Stop']")?.remove();
+      dom.query(".turn-action-controls").appendChild(dom.html("<button aria-label='Copy'></button>"));
+    },
+  });
+  assert.equal(capture.submitted.submitted, true, JSON.stringify(capture.submitted));
+  assert.equal(capture.terminal?.type, "content.response", JSON.stringify(capture.terminal));
+  assert.equal(capture.terminal.response.text, "OK");
 });
 
 test("production ChatGPT capture treats a retained hidden Stop control as idle", async () => {
@@ -4535,6 +4610,7 @@ const registeredDocumentHarness = async (label, options = {}) => {
           conversationUrl: providerUrl,
           conversationIdentity: `chatgpt:${providerUrl}`,
           conversationState: "confirmed",
+          ...(options.chatConfiguration ? { chatConfiguration: options.chatConfiguration } : {}),
         }
       : contentReply;
   };
@@ -4861,8 +4937,8 @@ const startCreatedRecoveryTurn = async (harness, socket, created = true) => {
   return selected;
 };
 
-const promoteRecoveryTurn = (harness, selected, overrides = {}) => {
-  const url = "https://chatgpt.com/c/durable-created";
+const promoteRecoveryTurn = (harness, selected, overrides = {},
+  url = "https://chatgpt.com/c/durable-created") => {
   harness.setProviderFrameUrl(url);
   harness.setProviderTabs([{ id: 31, url, title: "private title", status: "complete", active: false }]);
   return harness.fromContent({ type: "content.transition", submissionCommitted: true, requestId: "recovery-turn", agentId: "agent-1",
@@ -4877,12 +4953,19 @@ test("created chat persists before its binding event and final response, survive
   try {
     const socket = await harness.pair();
     const selected = await startCreatedRecoveryTurn(harness, socket);
+    const provisional = "https://chatgpt.com/c/local-chatgpt%3Af668ba9f-1ad1-4875-a815-2a3bbfad732a";
+    const final = "https://chatgpt.com/c/6ab65920-b6d4-83ec-8d3a-4064ebef03ca";
+    assert.deepEqual(await promoteRecoveryTurn(harness, selected, {}, provisional),
+      { success: true, accepted: true });
+    assert.equal(harness.storedState()["bachataBridgeState.v8"].conversationRegistry, undefined);
+    assert.equal(socket.sent.some((frame) => frame.type === "conversation.binding"), false);
     let release;
     const held = new Promise((resolve) => { release = resolve; });
     harness.setStorageWriteHandler(async (value) => {
       if (value["bachataBridgeState.v8"]?.conversationRegistry?.records.length) await held;
     });
-    const promotion = promoteRecoveryTurn(harness, selected);
+    const promotion = promoteRecoveryTurn(harness, selected,
+      { previousConversationUrl: provisional }, final);
     await drainRecovery();
     assert.equal(socket.sent.some((frame) => frame.type === "conversation.binding"), false);
     recoveryFrame(socket, { type: "provider.listRecoverableConversations", requestId: "list-before-storage" });
@@ -4893,7 +4976,7 @@ test("created chat persists before its binding event and final response, survive
     const records = harness.storedState()["bachataBridgeState.v8"].conversationRegistry.records;
     assert.equal(records.length, 1);
     record = records[0];
-    assert.equal(record.conversationUrl, "https://chatgpt.com/c/durable-created");
+    assert.equal(record.conversationUrl, final);
     assert.equal(socket.sent.some((frame) => frame.type === "conversation.response"), false);
     const bindingEvent = socket.sent.find((frame) => frame.type === "conversation.binding");
     assert.equal(bindingEvent.session.conversationIdentity, record.conversationIdentity);
@@ -4932,10 +5015,16 @@ test("created chat persists before its binding event and final response, survive
 });
 
 test("selected and discovered initial tabs publish early binding but never enter the created registry", async () => {
-  const harness = await registeredDocumentHarness("recovery-discovered", { providerUrl: "https://chatgpt.com/" });
+  const chatConfiguration = { mode: "Work", pickerLabel: "GPT-6", diagnostic: "work mode selected" };
+  const harness = await registeredDocumentHarness("recovery-discovered", { providerUrl: "https://chatgpt.com/", chatConfiguration });
   try {
     const socket = await harness.pair();
     const selected = await startCreatedRecoveryTurn(harness, socket, false);
+    assert.deepEqual(
+      socket.sent.filter((frame) => frame.type === "provider.status").flatMap((frame) => frame.sessions ?? [])
+        .find((session) => session.id === selected.sessionId)?.chatConfiguration,
+      chatConfiguration,
+    );
     assert.deepEqual(await promoteRecoveryTurn(harness, selected), { success: true, accepted: true });
     assert.equal(harness.storedState()["bachataBridgeState.v8"].conversationRegistry, undefined);
     assert.ok(socket.sent.some((frame) => frame.type === "conversation.binding"));

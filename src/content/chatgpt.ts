@@ -11,8 +11,10 @@ if (!bachataChatGptLogic || !bachataAssetLogic || !bachataProviderControls || !b
 
 const {
   canonicalConversationUrl,
-  canonicalizeRenderedPrompt,
-  chatGptRenderedPromptVariants,
+  chatGptComposerText,
+  chatGptComposerParagraphs,
+  chatGptConfiguration,
+  chatGptRenderedPromptMatches,
   composeCapturedResponse,
   conversationIdentityFor,
   chatGptAlertCandidates,
@@ -145,11 +147,18 @@ const composerSelectors = [
   "#prompt-textarea",
   "textarea[data-testid='prompt-textarea']",
   "div[contenteditable='true'][data-testid='prompt-textarea']",
+  "form[data-chatgpt-composer] [data-composer-markdown][contenteditable='true'][role='textbox']",
 ];
-const sendSelectors = ["button[data-testid='send-button']"];
-const stopSelectors = ["button[data-testid='stop-button']"];
-const assistantSelector = "[data-message-author-role='assistant']";
-const userSelector = "[data-message-author-role='user']";
+const sendSelectors = [
+  "button[data-testid='send-button']",
+  "form[data-chatgpt-composer] button[type='submit'][aria-label='Send']",
+];
+const stopSelectors = [
+  "button[data-testid='stop-button']",
+  "form[data-chatgpt-composer] button[aria-label='Stop']",
+];
+const assistantSelector = "[data-message-author-role='assistant'], [data-markdown-text-style='assistant-message']";
+const userSelector = "[data-message-author-role='user'], [data-user-message-bubble='true']";
 const documentToken = crypto.randomUUID();
 const maximumResponseBytes = 52_428_800;
 const requiredQuietMs = 2_500;
@@ -272,7 +281,7 @@ const { resolveComposer, waitForEnabledSendButton } = createComposerResolver({
 const readComposer = (element: HTMLTextAreaElement | HTMLInputElement | HTMLElement): string =>
   element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
     ? element.value
-    : element.innerText.replace(/\n$/, "");
+    : chatGptComposerText(element);
 
 const writeComposer = (
   element: HTMLTextAreaElement | HTMLInputElement | HTMLElement,
@@ -288,7 +297,11 @@ const writeComposer = (
     }
     setter.call(element, text);
   } else {
-    element.replaceChildren(document.createTextNode(text));
+    if (text.includes("\n")) {
+      element.replaceChildren(...chatGptComposerParagraphs(document, text));
+    } else {
+      element.replaceChildren(document.createTextNode(text));
+    }
   }
   element.dispatchEvent(
     new InputEvent("input", {
@@ -594,6 +607,7 @@ const providerStatus = createProviderStatusReader({
   composerBlockedReason: () => composerBlockedReason,
   generationActive: () => Boolean(activeRequest || stopButton()),
   composerConflict,
+  readChatConfiguration: () => chatGptConfiguration(document),
 });
 
 const registration = createRegistrationCoordinator({
@@ -635,7 +649,9 @@ const forgetRequest = createRequestTeardown({
 });
 
 const currentMessages = (selector: string): HTMLElement[] => {
-  const direct = Array.from(document.querySelectorAll<HTMLElement>(selector));
+  const matched = Array.from(document.querySelectorAll<HTMLElement>(selector));
+  const direct = matched.filter((candidate) =>
+    !matched.some((other) => other !== candidate && other.contains(candidate)));
   const healed = bachataDomHealing.messageElements("chatgpt").filter((candidate) =>
     !direct.some((element) => element === candidate || element.contains(candidate) || candidate.contains(element)),
   );
@@ -651,8 +667,13 @@ const messageId = (element: HTMLElement): string | undefined => {
     element.getAttribute("data-message-id") ??
     element.closest<HTMLElement>("[data-message-id]")?.getAttribute(
       "data-message-id",
-    );
-  return candidate?.trim() || undefined;
+    ) ?? element.closest<HTMLElement>("[data-chatgpt-selection-message-id]")
+      ?.getAttribute("data-chatgpt-selection-message-id");
+  if (candidate?.trim()) return candidate.trim();
+  const searchIds = element.closest<HTMLElement>("[data-chatgpt-search-message-ids]")
+    ?.getAttribute("data-chatgpt-search-message-ids")?.trim().split(/\s+/u);
+  const unique = new Set(searchIds);
+  return unique.size === 1 ? searchIds?.[0] : undefined;
 };
 
 const isAfter = (candidate: Node, reference: Node): boolean =>
@@ -677,15 +698,10 @@ const matchingNewUsers = (
   currentMessages(userSelector).filter(
     (element) =>
       !binding.previousUsers.has(element) &&
-      chatGptRenderedPromptVariants(element).some(
-        (candidate) => canonicalizeRenderedPrompt(candidate) === binding.text,
-      ),
+      chatGptRenderedPromptMatches(element, binding.text),
   );
 
-const submittedPromptMatches = (element: HTMLElement, expected: string): boolean =>
-  chatGptRenderedPromptVariants(element).some(
-    (candidate) => canonicalizeRenderedPrompt(candidate) === expected,
-  );
+const submittedPromptMatches = chatGptRenderedPromptMatches;
 
 const resolveSubmittedUser = (binding: SubmittedUserBinding): HTMLElement => {
   if (binding.providerMessageId) {
@@ -1288,7 +1304,7 @@ const submit = async (
     }
     const composerText = readComposer(element);
     if (expectedComposerText === undefined ? composerText.trim().length > 0 : composerText !== expectedComposerText) {
-      return "ChatGPT composer changed the prompt text";
+      return `ChatGPT composer changed the prompt text (actual length ${composerText.length}, expected ${expectedComposerText?.length ?? 0}; actual prefix ${JSON.stringify(composerText.slice(0, 100))})`;
     }
     return undefined;
   };

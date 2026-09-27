@@ -110,6 +110,7 @@ const routedPairing = (value: string): RoutedPairing | undefined => {
 let endpointDraft = "";
 let endpointInitialized = false;
 let endpointDirty = false;
+let serverPortEdited = false;
 let tokenDraft = "";
 let otpDraft = ["", "", "", ""];
 let tokenError = "";
@@ -375,6 +376,12 @@ const endpointProblem = (value: string): string => {
   }
 };
 
+const serverPortProblem = (value: string): string => {
+  const trimmed = value.trim();
+  return /^[1-9][0-9]{0,4}$/u.test(trimmed) && Number(trimmed) <= 65_535
+    ? "" : "Enter a port from 1 to 65535.";
+};
+
 const boundTab = (): PopupTab | undefined =>
   state.tabs.find((tab) => tab.id === state.selectedTabId);
 
@@ -456,6 +463,20 @@ const buildDom = () => {
   tokenErrorText.setAttribute("role", "alert");
   const tokenHint = create("p", { id: "token-hint", className: "hint", text: "Enter the four-digit code shown in Bachata. It remains valid until used or reset." });
 
+  const serverPortLabel = create("label", { text: "Local server port" });
+  serverPortLabel.setAttribute("for", "server-port");
+  const serverPort = create("input", { id: "server-port" });
+  serverPort.type = "text";
+  serverPort.inputMode = "numeric";
+  serverPort.maxLength = 5;
+  serverPort.value = "43127";
+  serverPort.setAttribute("aria-describedby", "server-port-hint server-port-error");
+  const serverPortHint = create("p", { id: "server-port-hint", className: "hint", text: "Use the port printed by another local Bachata host. The code still has four digits." });
+  const serverPortError = create("p", { id: "server-port-error", className: "field-error" });
+  serverPortError.setAttribute("role", "alert");
+  const serverOptions = create("details", { id: "server-options", className: "server-options" });
+  serverOptions.append(create("summary", { text: "Connect to another local server" }), serverPortLabel, serverPort, serverPortHint, serverPortError);
+
   const pair = create("button", { id: "pair", className: "primary grow", text: "Connect to VS Code" });
   pair.type = "submit";
   const cancelConnect = create("button", { id: "cancel-connect", className: "ghost", text: "Cancel" });
@@ -464,7 +485,7 @@ const buildDom = () => {
   formActions.append(tokenPastePair, pair, cancelConnect);
 
   const form = create("form", { id: "pairing-form" });
-  form.append(tokenHint, tokenField, tokenErrorText, formActions);
+  form.append(tokenHint, tokenField, serverOptions, tokenErrorText, formActions);
 
   const retryText = create("span", { id: "retry-text" });
   const reconnect = create("button", { id: "reconnect", className: "small", text: "Reconnect now" });
@@ -519,6 +540,8 @@ const buildDom = () => {
     tokenPaste,
     tokenPastePair,
     tokenErrorText,
+    serverPort,
+    serverPortError,
     pair,
     cancelConnect,
     retry,
@@ -568,13 +591,14 @@ const pairingDraftReady = (): boolean => {
 
 const endpointForPairing = (value: string, fallback: string): string => {
   const trimmed = value.trim();
-  return routedPairing(trimmed)?.endpoint ?? (/^[0-9]{4}$/u.test(trimmed) ? canonicalEndpoint : fallback);
+  return routedPairing(trimmed)?.endpoint ?? (/^[0-9]{4}$/u.test(trimmed) && !serverPortEdited ? canonicalEndpoint : fallback);
 };
 
 const useCanonicalEndpointForShortCode = (value: string): void => {
-  if (!/^[0-9]{4}$/u.test(value.trim())) return;
+  if (!/^[0-9]{4}$/u.test(value.trim()) || serverPortEdited) return;
   endpointDraft = canonicalEndpoint;
   endpointDirty = false;
+  dom.serverPort.value = "43127";
 };
 
 const acceptPairingValue = (value: string): boolean => {
@@ -585,6 +609,8 @@ const acceptPairingValue = (value: string): boolean => {
   if (routed) {
     endpointDraft = routed.endpoint;
     endpointDirty = true;
+    serverPortEdited = false;
+    dom.serverPort.value = new URL(routed.endpoint).port;
   } else {
     useCanonicalEndpointForShortCode(trimmed);
   }
@@ -824,9 +850,14 @@ const render = (): void => {
   setDisabled(dom.disconnect, pending);
 
   const problem = endpointProblem(endpointDraft);
+  const portProblem = serverPortProblem(dom.serverPort.value);
+  setText(dom.serverPortError, portProblem);
+  setHidden(dom.serverPortError, portProblem === "");
+  dom.serverPort.setAttribute("aria-invalid", portProblem !== "" ? "true" : "false");
+  setDisabled(dom.serverPort, pending || state.connecting);
   dom.tokenInputs.forEach((input) => setDisabled(input, pending));
   setDisabled(dom.tokenPaste, pending || pasting);
-  setDisabled(dom.tokenPastePair, pending || pasting || !endpointDraft.trim() || problem !== "");
+  setDisabled(dom.tokenPastePair, pending || pasting || state.connecting || !endpointDraft.trim() || problem !== "" || portProblem !== "");
   setText(dom.tokenErrorText, tokenError);
   setHidden(dom.tokenErrorText, tokenError === "");
   dom.tokenInputs.forEach((input) => {
@@ -842,7 +873,7 @@ const render = (): void => {
   setHidden(dom.pair, tokenDraft.trim() === "");
   setText(dom.tokenPastePair, pasting ? "Reading clipboard…" : pending ? "Please wait…" : "Paste & connect");
   setText(dom.pair, pending ? "Please wait…" : "Connect to VS Code");
-  setDisabled(dom.pair, pending || !endpointDraft.trim() || !pairingDraftReady() || problem !== "");
+  setDisabled(dom.pair, pending || state.connecting || !endpointDraft.trim() || !pairingDraftReady() || problem !== "" || portProblem !== "");
   setHidden(dom.cancelConnect, !state.connecting);
   setDisabled(dom.cancelConnect, pending);
 
@@ -883,6 +914,17 @@ const replaceState = (nextState: State): boolean => {
   }
   if (JSON.stringify(nextState) === JSON.stringify(state)) {
     return false;
+  }
+  if (nextState.connected && !state.connected && tokenDraft) {
+    tokenDraft = "";
+    tokenEditRevision += 1;
+    invalidatePairingIntent();
+    endpointDirty = false;
+    endpointInitialized = false;
+    serverPortEdited = false;
+    dom.serverPort.value = "43127";
+    connectionOpen = false;
+    writeOtp("");
   }
   if (nextState.error !== state.error) {
     errorOccurrence += 1;
@@ -951,16 +993,6 @@ const apply = async (message: unknown): Promise<void> => {
   try {
     const response = await call(message);
     const acceptedState = isState(response) && response.revision >= state.revision;
-    const pairingConnected = acceptedState && response.connected;
-    if (pairingConnected && type === "popup.pair") {
-      endpointDirty = false;
-      endpointInitialized = false;
-      tokenDraft = "";
-      tokenEditRevision += 1;
-      invalidatePairingIntent();
-      connectionOpen = false;
-      writeOtp("");
-    }
     if (acceptedState && type === "popup.select") {
       choosingConversation = false;
     }
@@ -976,6 +1008,27 @@ const apply = async (message: unknown): Promise<void> => {
     render();
   }
 };
+
+dom.serverPort.addEventListener("input", () => {
+  const port = dom.serverPort.value.trim();
+  const routed = routedPairing(tokenDraft);
+  if (routed) {
+    tokenDraft = routed.token;
+    writeOtp(tokenDraft);
+  }
+  if (serverPortProblem(port) === "") {
+    serverPortEdited = port !== "43127";
+    endpointDraft = `ws://127.0.0.1:${port}/bachata-browser-bridge-v9`;
+    endpointDirty = serverPortEdited;
+  } else {
+    serverPortEdited = true;
+    endpointDirty = true;
+  }
+  tokenEditRevision += 1;
+  invalidatePairingIntent();
+  tokenError = "";
+  render();
+});
 
 dom.tokenInputs.forEach((input, index) => {
   input.addEventListener("input", () => {
@@ -1069,11 +1122,11 @@ dom.tokenPaste.addEventListener("click", () => {
  * host and path remain fixed here; legacy raw tokens continue to use the endpoint field.
  */
 dom.tokenPastePair.addEventListener("click", () => {
-  if (pending || pasting) {
+  if (pending || pasting || state.connecting) {
     return;
   }
   const endpoint = endpointDraft.trim();
-  if (endpoint === "" || endpointProblem(endpoint) !== "") {
+  if (endpoint === "" || endpointProblem(endpoint) !== "" || serverPortProblem(dom.serverPort.value) !== "") {
     tokenError = "Check the endpoint before pairing.";
     render();
     return;
@@ -1101,7 +1154,7 @@ dom.tokenPastePair.addEventListener("click", () => {
       render();
       return;
     }
-    if (endpointDraft.trim() !== endpoint || endpointProblem(endpoint) !== "") {
+    if (endpointDraft.trim() !== endpoint || endpointProblem(endpoint) !== "" || serverPortProblem(dom.serverPort.value) !== "") {
       pasting = false;
       render();
       return;
@@ -1125,6 +1178,7 @@ dom.tokenPastePair.addEventListener("click", () => {
 });
 dom.form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (pending || state.connecting) return;
   const routed = routedPairing(tokenDraft);
   if (tokenDraft.trim().startsWith("v9.") && !routed) {
     tokenError = "That pairing code is invalid. Copy it again in VS Code.";
@@ -1139,7 +1193,7 @@ dom.form.addEventListener("submit", (event) => {
     focusOtp();
     return;
   }
-  if (pending || !endpoint.trim() || endpointProblem(endpoint) !== "") {
+  if (pending || !endpoint.trim() || endpointProblem(endpoint) !== "" || serverPortProblem(dom.serverPort.value) !== "") {
     return;
   }
   if (routed) {

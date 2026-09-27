@@ -110,11 +110,17 @@ test("packaged entries are derived from sources plus generated assets", async ()
   });
 });
 
-test("package collection rejects included symbolic links", async () => {
+test("package collection rejects included symbolic links", async (t) => {
   await withTempDirectory(async (directory) => {
     const target = path.join(directory, "target.js");
     await writeFile(target, "export const value = 1;\n", "utf8");
-    await symlink(target, path.join(directory, "linked.js"));
+    try {
+      await symlink(target, path.join(directory, "linked.js"));
+    } catch (error) {
+      if (process.platform !== "win32" || error?.code !== "EPERM" || error?.syscall !== "symlink") throw error;
+      t.skip("Windows denied symbolic-link creation; this fixture cannot run on this account");
+      return;
+    }
     await assert.rejects(collectFiles(directory), /do not permit symbolic links: linked\.js/u);
   });
 });

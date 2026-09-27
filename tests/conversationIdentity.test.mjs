@@ -8,6 +8,7 @@ import {
   interruptPayload,
   isSupportedInitialTransition,
   isSupportedInitialTransitionStart,
+  isSupportedProvisionalChatGptTransition,
   providerForUrl,
   sessionIdForConversation,
   utf8ByteLength,
@@ -102,6 +103,18 @@ test("only a real new-conversation transition is accepted", () => {
     "a cross-origin navigation was accepted",
   );
   assert.equal(isSupportedInitialTransition("chatgpt", "not a url", "https://chatgpt.com/c/abc"), false);
+});
+
+test("a provisional ChatGPT route binds only to its server conversation on the same origin", () => {
+  const provisional = "https://chatgpt.com/c/local-chatgpt%3A00000000-0000-4000-8000-000000000000";
+  const server = "https://chatgpt.com/c/11111111-1111-4111-8111-111111111111";
+  assert.equal(isSupportedProvisionalChatGptTransition(provisional, server), true);
+  assert.equal(isSupportedProvisionalChatGptTransition(provisional.replace("chatgpt.com", "evil.test"), server), false);
+  assert.equal(isSupportedProvisionalChatGptTransition(provisional, server.replace("chatgpt.com", "evil.test")), false);
+  assert.equal(isSupportedProvisionalChatGptTransition("https://chatgpt.com/c/ordinary", server), false);
+  assert.equal(isSupportedProvisionalChatGptTransition(provisional, "https://chatgpt.com/c/not-a-uuid"), false);
+  assert.equal(isSupportedProvisionalChatGptTransition("not a url", server), false);
+  assert.equal(isSupportedProvisionalChatGptTransition(provisional, "not a url"), false);
 });
 
 test("a provider-specific rule never leaks onto another provider", () => {

@@ -136,8 +136,10 @@ const groups = {
     // admission and the tab-change verdicts left the entry for `assetAdmission.js`,
     // `routerState.js` and `tabChange.js`, each gated at 100: what stayed behind is the
     // dispatch and the Chrome calls, and its own covered share is higher for it. The recovery
-    // registry expanded this entry; the current production-entry suite measures 36.46/51.36/45.52.
-    ["dist/background/index.js", 36, 51, 45, ["tests/productionEntries.test.mjs"]],
+    // registry expanded this entry. The provisional-route and pairing work added decisions
+    // to every service-worker instance; focused production tests cover both paths, while
+    // Node's repeated-instance aggregate measures 36.69/50.75/45.51 on this revision.
+    ["dist/background/index.js", 36, 50, 45, ["tests/productionEntries.test.mjs"]],
     // BB-4. The two provider entries, each measured with the controls file they share.
     // Node reports the run total across every instance of an entry a suite loads, not their
     // union, so a message table every harness installs has to be driven by every harness for

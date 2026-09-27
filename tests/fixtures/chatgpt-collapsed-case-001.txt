@@ -1,0 +1,1 @@
+{"task":"Preserve exact inline code when a long ChatGPT user message collapses.","sourceSnapshot":"The slider starts at `0%`, reaches `100%`, and the check is `npm test`.","instructions":"Read the current visible prompt. Ignore Show more and Show less controls. Keep the backticks around inline code when matching the submitted text."}

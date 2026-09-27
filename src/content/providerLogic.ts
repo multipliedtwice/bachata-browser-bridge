@@ -91,6 +91,7 @@ type ProviderStatusValue = {
   conversationUrl: string;
   conversationIdentity: string;
   conversationState: "confirmed" | "uncertain";
+  chatConfiguration?: { mode: "Chat" | "Work" | "Unknown"; pickerLabel: string; diagnostic?: string };
 };
 
 type ProviderStatusOptions = {
@@ -110,6 +111,7 @@ type ProviderStatusOptions = {
   generationActive: () => boolean;
   /** Why this composer cannot be used even though it resolved, or nothing. */
   composerConflict: (composer: HTMLElement) => string | undefined;
+  readChatConfiguration?: () => { mode: "Chat" | "Work" | "Unknown"; pickerLabel: string; diagnostic?: string } | undefined;
 };
 
 type InterruptControlOptions = {
@@ -884,6 +886,22 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
     }
   };
 
+  const isSupportedProvisionalChatGptTransition = (
+    previousUrl: string,
+    nextUrl: string,
+  ): boolean => {
+    if (config.provider !== "chatgpt") return false;
+    try {
+      const previous = new URL(previousUrl);
+      const next = new URL(nextUrl);
+      return previous.origin === config.origin && next.origin === previous.origin
+        && /^\/c\/local-chatgpt%3A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(previous.pathname)
+        && /^\/c\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(next.pathname);
+    } catch {
+      return false;
+    }
+  };
+
   const normalizePartText = (value: string): string =>
   value.replace(/\r\n/g, "\n").replace(/\u00a0/g, " ");
 
@@ -1241,6 +1259,16 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
     if (explicit?.trim()) {
       return explicit.trim();
     }
+    if (element.getAttribute("data-markdown-copy") === "code-block") {
+      const label = element
+        .querySelector<HTMLElement>('[data-markdown-copy="exclude"]')
+        ?.querySelector<HTMLElement>("div")
+        ?.textContent?.trim()
+        .toLowerCase();
+      if (label && /^[a-z0-9+#_.-]{1,30}$/.test(label)) {
+        return label;
+      }
+    }
     const code = element.matches("code")
       ? element
       : element.querySelector<HTMLElement>("code");
@@ -1321,6 +1349,15 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
       if (node.tagName === "BR") {
         newline();
         return;
+      }
+      if (node.getAttribute("data-markdown-copy") === "code-block") {
+        const code = node.querySelector<HTMLElement>("code");
+        if (code) {
+          newline();
+          append("codeBlock", code.textContent ?? "", codeLanguage(node));
+          newline();
+          return;
+        }
       }
       if (node.tagName === "PRE") {
         newline();
@@ -1476,13 +1513,17 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
   const answer = (
     status: string,
     state: "confirmed" | "uncertain" = conversationState,
-  ): ProviderStatusValue => ({
-    status,
-    documentToken: options.documentToken,
-    conversationUrl,
-    conversationIdentity,
-    conversationState: state,
-  });
+  ): ProviderStatusValue => {
+    const chatConfiguration = options.readChatConfiguration?.();
+    return {
+      status,
+      documentToken: options.documentToken,
+      conversationUrl,
+      conversationIdentity,
+      conversationState: state,
+      ...(chatConfiguration ? { chatConfiguration } : {}),
+    };
+  };
   try {
     const composer = await options.resolveComposer();
     if (!composer) {
@@ -2229,8 +2270,10 @@ const createProviderLogic = (config: BachataProviderConfig): BachataProviderLogi
         request.documentToken !== hooks.documentToken ||
         request.frameId !== 0 ||
         !request.allowInitialConversationTransition ||
-        request.transitionUsed ||
-        !isSupportedInitialTransition(request.conversationUrl, nextUrl)
+        (request.transitionUsed
+          ? !(request.authorizedConversationIdentity === conversationIdentityFor("https://chatgpt.com/")
+            && isSupportedProvisionalChatGptTransition(request.conversationUrl, nextUrl))
+          : !isSupportedInitialTransition(request.conversationUrl, nextUrl))
       ) {
         throw new Error(`The ${config.label} conversation changed during the active request`);
       }

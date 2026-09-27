@@ -8,6 +8,8 @@ import type {
 import {
   canonicalConversationUrl,
   conversationIdentityFor,
+  isSupportedInitialTransition,
+  isSupportedProvisionalChatGptTransition,
   providerForUrl,
   sessionIdForConversation,
 } from "./conversation.js";
@@ -43,6 +45,25 @@ export type StoredState = {
   reconnectAttempt?: number | undefined;
   reconnectAt?: number | undefined;
 };
+
+/** A repeated click must not consume a one-use code or replace its live socket. */
+export const pairingIsCurrent = (input: {
+  endpoint: string;
+  token: string;
+  storedEndpoint: string | undefined;
+  pairingToken: string | undefined;
+  connecting: boolean;
+  connected: boolean;
+  connectionToken: string | undefined;
+}): boolean => input.storedEndpoint === input.endpoint &&
+  ((input.connecting && input.pairingToken === input.token)
+    || (input.connected && Boolean(input.connectionToken)));
+
+/** Chat mode is meaningful only for ChatGPT sessions. */
+export const chatConfigurationForSession = (
+  provider: BrowserProvider,
+  chatConfiguration: BrowserSession["chatConfiguration"],
+) => provider === "chatgpt" && chatConfiguration ? { chatConfiguration } : {};
 
 /**
  * Whether an interrupt names exactly the request that is running.
@@ -451,12 +472,21 @@ export const admitInitialTransition = (input: {
   if (!request.allowInitialConversationTransition) {
     return { admitted: false, reason: "transition_not_allowed" };
   }
-  if (request.transitionUsed) return { admitted: false, reason: "transition_already_used" };
-  if (!input.supportedTransition(
-    request.provider,
-    request.conversationUrl,
-    binding.conversationUrl,
+  const provisionalFinal = request.provider === "chatgpt"
+    && request.transitionUsed
+    && isSupportedInitialTransition("chatgpt", request.initialConversationUrl, request.conversationUrl)
+    && isSupportedProvisionalChatGptTransition(request.conversationUrl, binding.conversationUrl);
+  if (request.transitionUsed && !provisionalFinal) {
+    return { admitted: false, reason: "transition_already_used" };
+  }
+  if (!provisionalFinal && !input.supportedTransition(
+    request.provider, request.conversationUrl, binding.conversationUrl,
   )) {
+    return { admitted: false, reason: "unsupported_transition" };
+  }
+  if (message.previousConversationUrl !== request.conversationUrl
+    || message.conversationUrl !== binding.conversationUrl
+    || message.conversationIdentity !== binding.conversationIdentity) {
     return { admitted: false, reason: "unsupported_transition" };
   }
   return {

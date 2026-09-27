@@ -109,6 +109,23 @@ export const isSupportedInitialTransition = (
   }
 };
 
+/** ChatGPT may replace its provisional local route with a server conversation in the same document. */
+export const isSupportedProvisionalChatGptTransition = (
+  previousUrl: string,
+  nextUrl: string,
+): boolean => {
+  try {
+    const previous = new URL(previousUrl);
+    const next = new URL(nextUrl);
+    return previous.origin === "https://chatgpt.com"
+      && next.origin === previous.origin
+      && /^\/c\/local-chatgpt%3A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(previous.pathname)
+      && /^\/c\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(next.pathname);
+  } catch {
+    return false;
+  }
+};
+
 // An ActiveRequest is built with `{ ...message }` from the parsed conversation.send, so it
 // carries that message's own `type`, `text` and `attachments` at runtime even though
 // ActiveRequest does not declare them. Spreading it into an interrupt payload therefore

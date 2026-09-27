@@ -1,4 +1,4 @@
-import { isRecoverableConversation, maximumRecoverableConversations, type RecoverableConversation } from "../protocol/recovery.js";
+import { isRecoverableConversation, isStableRecoveryIdentity, maximumRecoverableConversations, type RecoverableConversation } from "../protocol/recovery.js";
 import type { BrowserSession } from "../protocol/types.js";
 import type { ActiveRequest, DocumentBinding } from "./routerState.js";
 
@@ -75,4 +75,11 @@ export const promoteCreatedConversation = (input: {
   const registry = normalizeConversationRegistry(input.registry);
   if (registry.records.some((entry) => entry.id === record.id || entry.conversationIdentity === record.conversationIdentity)) return undefined;
   return normalizeConversationRegistry({ version: 1, records: [...registry.records, record] });
+};
+
+/** A temporary ChatGPT route keeps the creation marker for the final server route. */
+export const planCreatedConversationPromotion = (input: Parameters<typeof promoteCreatedConversation>[0]) => {
+  const stable = isStableRecoveryIdentity(input.request.provider,
+    input.request.conversationUrl, input.request.conversationIdentity);
+  return { stable, registry: stable ? promoteCreatedConversation(input) : undefined };
 };

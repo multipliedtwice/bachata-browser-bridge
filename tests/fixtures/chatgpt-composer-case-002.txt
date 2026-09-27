@@ -1,0 +1,1 @@
+{"task":"Check exact composer text when the browser renders a URL as a rich link.","source":"https://chromewebstore.google.com/detail/google-input-tools/mclkkofklkfljcocdinagocijmpgbhab","instructions":"Keep the source URL in place even when the browser inserts a visual line break before the link. Preserve every other character of the submitted prompt."}

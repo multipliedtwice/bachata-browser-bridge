@@ -1,0 +1,4 @@
+Read the JSON task below. Preserve its contents when composing the message.
+```json
+{"task":"Read a fenced JSON request","source":"https://example.org/guide","instructions":"Keep the fence, the JSON line, and the trailing fence as separate composer paragraphs."}
+```

@@ -1,5 +1,4 @@
-import { bindProvisionalCreation, maximumProvisionalCreations, normalizeConversationRegistry, promoteCreatedConversation, provisionalCreationLifetimeMs, type ProvisionalCreation } from "./conversationRegistry.js";
-import { isStableRecoveryIdentity } from "../protocol/recovery.js";
+import { bindProvisionalCreation, maximumProvisionalCreations, normalizeConversationRegistry, planCreatedConversationPromotion, provisionalCreationLifetimeMs, type ProvisionalCreation } from "./conversationRegistry.js";
 import { bindCurrentGenericTab, ensureGenericContentScript, genericRegistrations, genericStatus, handleGenericContentMessage, handleGenericContextMenu, handleGenericProfileStorageMessage, isGenericTab, registerGenericContextMenus, removeGenericRegistration, restoreGenericRegistrations, sendGenericCommand, storedGenericProfileOrigins } from "./genericProvider.js";
 import { handleLocalModelPromptMessage, setLocalModelConfig } from "./localModelProxy.js";
 import { handleQuarantineMessage } from "./quarantine.js";
@@ -94,6 +93,8 @@ import {
   genericStatusMatchesAttestation,
   sessionForAttestation,
   interruptMatchesRequest,
+  pairingIsCurrent,
+  chatConfigurationForSession,
   legacyStorageKeys,
   migratedStoredCandidate,
   normalizedHandledTabIds,
@@ -134,6 +135,7 @@ type ContentStatus = {
   conversationUrl?: string;
   conversationIdentity?: string;
   conversationState?: "confirmed" | "uncertain";
+  chatConfiguration?: { mode: "Chat" | "Work" | "Unknown"; pickerLabel: string; diagnostic?: string };
 };
 
 type ContentAck = {
@@ -542,6 +544,7 @@ const buildSessions = async (
       conversationUrl: binding.conversationUrl,
       conversationIdentity: binding.conversationIdentity,
       ...(tab?.title ? { title: tab.title } : {}),
+      ...chatConfigurationForSession(binding.provider, status.chatConfiguration),
       capabilities: {
         submission: "native",
         completion: "native",
@@ -2330,16 +2333,17 @@ const applyTransition = async (
   }
   documentsByTab.set(admission.binding.tabId, admission.binding);
   if (request) {
-    const registry = promoteCreatedConversation({ registry: stored.conversationRegistry,
-      marker: provisionalCreations.get(request.tabId), request, binding: admission.binding, now: Date.now() });
-    provisionalCreations.delete(request.tabId);
+    const promotion = planCreatedConversationPromotion({ registry: stored.conversationRegistry,
+      marker: provisionalCreations.get(request.tabId), request, binding: admission.binding,
+      now: Date.now() });
+    if (promotion.stable) provisionalCreations.delete(request.tabId);
+    const registry = promotion.registry;
     if (registry) {
       stored.conversationRegistry = registry;
       await saveStored();
       recoverableRegistry = registry;
     }
-    if (activeRequests.get(request.requestId) === request && connected
-      && isStableRecoveryIdentity(request.provider, request.conversationUrl, request.conversationIdentity)) {
+    if (activeRequests.get(request.requestId) === request && connected && promotion.stable) {
       const timestamp = new Date().toISOString();
       sendSocket({ type: "conversation.binding", protocolVersion, requestId: request.requestId,
         agentId: request.agentId, sessionId: request.sessionId,
@@ -2488,6 +2492,12 @@ chrome.runtime.onMessage.addListener(
           throw new Error(
             "Enter the loopback endpoint and pairing token shown by Bachata",
           );
+        }
+        // A four-digit code is one-use. The pairing call returns while the socket is still
+        // connecting, so a second click must not discard the first socket and replay its code.
+        if (pairingIsCurrent({ endpoint, token, storedEndpoint: stored.endpoint,
+          pairingToken, connecting, connected, connectionToken: stored.connectionToken })) {
+          return popupState();
         }
         stored.endpoint = endpoint;
         stored.connectionToken = undefined;

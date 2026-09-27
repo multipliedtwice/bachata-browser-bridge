@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import * as backgroundConversation from "../dist/background/conversation.js";
@@ -27,12 +28,16 @@ const {
   createStreamSender,
   createSubmittedPromptWaiter,
   chatGptRenderedPromptVariants,
+  chatGptRenderedPromptMatches,
   installProviderDocument,
   writeStagedAttachments,
   requestMatchesDocument,
   startLifecycleObserver,
   createComposerGuard,
   sendBackground,
+  chatGptComposerText,
+  chatGptComposerParagraphs,
+  chatGptConfiguration,
   chatGptCompletionActionVisible,
   chatGptTurnIdentity,
   chatGptObservationFaultVerdict,
@@ -51,12 +56,97 @@ const {
   utf8ByteLength,
 } = globalThis.__pairChatGptLogic;
 
+test("ChatGPT Bridge status reads selected mode and picker label", () => {
+  const dom = createGenericDom('<button aria-pressed="true">Chat</button><button aria-pressed="false">Work</button><button aria-label="Select ChatGPT model">Instant</button>');
+  try {
+    assert.deepEqual(chatGptConfiguration(dom.document), { mode: "Chat", pickerLabel: "Instant" });
+    dom.query('[aria-pressed="true"]').setAttribute("aria-pressed", "false");
+    dom.query("button:nth-child(2)").setAttribute("aria-pressed", "true");
+    assert.deepEqual(chatGptConfiguration(dom.document), { mode: "Work", pickerLabel: "Instant" });
+    dom.query('[aria-label="Select ChatGPT model"]').textContent = "";
+    const diagnostic = chatGptConfiguration(dom.document);
+    assert.equal(diagnostic.mode, "Work");
+    assert.equal(diagnostic.pickerLabel, "");
+    assert.match(diagnostic.diagnostic, /^modeControls=2;selectedModes=1;picker=found;modeElements=/u);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("ChatGPT status diagnoses a visible user turn and accepts a renamed model picker", () => {
+  const dom = createGenericDom('<button aria-pressed="true">Chat</button><button aria-label="Select model">GPT</button><div data-user-message-bubble="true">hello</div>');
+  try {
+    assert.deepEqual(chatGptConfiguration(dom.document), { mode: "Chat", pickerLabel: "GPT" });
+    dom.query('[aria-label="Select model"]').remove();
+    const diagnostic = chatGptConfiguration(dom.document);
+    assert.equal(diagnostic.mode, "Chat");
+    assert.match(diagnostic.diagnostic, /userShape=.*hello/u);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("multiline composer paragraphs preserve a fenced JSON prompt", () => {
+  const prompt = readFileSync(new URL("./fixtures/chatgpt-fenced-case-003.txt", import.meta.url), "utf8");
+  const dom = createGenericDom('<div id="composer" contenteditable="true"></div>');
+  try {
+    const composer = dom.query("#composer");
+    for (const paragraph of chatGptComposerParagraphs(dom.document, prompt)) composer.appendChild(paragraph);
+    assert.equal(composer.children.length, 4);
+    assert.equal(composer.children[0].textContent, prompt.split("\n")[0]);
+    assert.equal(composer.children[1].textContent, "```json");
+    assert.equal(composer.children[2].textContent, prompt.split("\n")[2]);
+    assert.equal(composer.children[3].textContent, "```");
+    assert.equal(chatGptComposerText(composer), prompt);
+  } finally {
+    dom.restore();
+  }
+});
+
 test("rendered prompt canonicalization is narrow and deterministic", () => {
   assert.equal(
     canonicalizeRenderedPrompt("line 1\r\nline\u00a02\n"),
     "line 1\nline 2",
   );
   assert.equal(canonicalizeRenderedPrompt("a\n\n"), "a\n");
+});
+
+test("the composer retains exact bytes through rich URL rendering", () => {
+  const prompt = readFileSync(new URL("./fixtures/chatgpt-composer-case-002.txt", import.meta.url), "utf8");
+  const dom = createGenericDom('<div id="composer" contenteditable="true" data-composer-markdown=""><p></p></div>');
+  try {
+    const composer = dom.query("#composer");
+    const paragraph = composer.querySelector("p");
+    const url = "https://chromewebstore.google.com/detail/google-input-tools/mclkkofklkfljcocdinagocijmpgbhab";
+    const start = prompt.indexOf(url);
+    assert.ok(start > 0);
+    paragraph.appendChild(dom.document.createTextNode(prompt.slice(0, start)));
+    const richLink = dom.document.createElement("span");
+    richLink.setAttribute("rich-link-source-app-id", "");
+    richLink.textContent = url;
+    paragraph.appendChild(richLink);
+    paragraph.appendChild(dom.document.createTextNode(prompt.slice(start + url.length)));
+    Object.defineProperty(composer, "innerText", { configurable: true,
+      value: prompt.replace(url, `\n${url}`) });
+    assert.equal(composer.textContent, prompt);
+    assert.notEqual(composer.innerText, prompt);
+    assert.equal(chatGptComposerText(composer), prompt);
+    paragraph.appendChild(dom.document.createElement("br"));
+    assert.equal(chatGptComposerText(composer), composer.innerText);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("ChatGPT composer falls back to visible text when a paragraph contains hidden UI", () => {
+  const dom = createGenericDom('<div id="composer"><p>task <span aria-hidden="true">helper</span></p></div>');
+  try {
+    const composer = dom.query("#composer");
+    Object.defineProperty(composer, "innerText", { configurable: true, value: "task" });
+    assert.equal(chatGptComposerText(composer), "task");
+  } finally {
+    dom.restore();
+  }
 });
 
 test("a collapsed ChatGPT prompt reconstructs every inline-code delimiter without UI text", () => {
@@ -85,6 +175,57 @@ test("a collapsed ChatGPT prompt reconstructs every inline-code delimiter withou
   } finally {
     dom.restore();
   }
+});
+
+test("a prompt matches ChatGPT's current collapsed bubble exactly", () => {
+  const prompt = readFileSync(new URL("./fixtures/chatgpt-collapsed-case-001.txt", import.meta.url), "utf8");
+  const dom = createGenericDom(`<div data-user-message-bubble="true"><div data-search-result-target></div><span>…</span><button>Show more</button></div>`);
+  try {
+    const content = dom.query("[data-search-result-target]");
+    const pieces = prompt.split("`");
+    assert.equal(pieces.length % 2, 1, "the saved prompt has paired inline-code delimiters");
+    pieces.forEach((piece, index) => {
+      if (index % 2 === 0) content.appendChild(dom.document.createTextNode(piece));
+      else {
+        const code = dom.document.createElement("code");
+        code.textContent = piece;
+        content.appendChild(code);
+      }
+    });
+    assert.equal(chatGptRenderedPromptVariants(dom.query("[data-user-message-bubble]")).some(
+      (candidate) => canonicalizeRenderedPrompt(candidate) === prompt,
+    ), true);
+  } finally { dom.restore(); }
+});
+
+test("a long submitted prompt binds after Markdown links become rich links", () => {
+  const prompt = readFileSync(new URL("./fixtures/chatgpt-submitted-case-003.txt", import.meta.url), "utf8");
+  const linkPattern = /\[(https?:\/\/[^\]\s]+)\]\(\1\)/gu;
+  const rendered = prompt.replace(linkPattern, (_, url) =>
+    `[${url}\\](${url}]\\(${url}\\))`);
+  const dom = createGenericDom('<div data-user-message-bubble="true"><div data-search-result-target></div><button>Show more</button></div>');
+  try {
+    const message = dom.query("[data-user-message-bubble]");
+    const content = dom.query("[data-search-result-target]");
+    content.textContent = rendered;
+    assert.notEqual(rendered, prompt);
+    assert.equal(chatGptRenderedPromptMatches(message, prompt), true);
+    assert.equal(chatGptRenderedPromptMatches(message, prompt.replace("No telemetry.", "With telemetry.")), false);
+    assert.equal(chatGptRenderedPromptMatches(message, prompt.replace("https://www.google.com/inputtools/try/", "https://example.com/")), false);
+  } finally { dom.restore(); }
+});
+
+test("a one-time request marker binds a Markdown-reformatted short prompt", () => {
+  const marker = "BACHATA_REQUEST_ID:196b33a4-c5a6-4e60-9774-1f8ea8d0e29c";
+  const prompt = `${marker}\nRead the task.\n\`\`\`json\n{"case":3}\n\`\`\``;
+  const dom = createGenericDom('<div data-user-message-bubble="true"><div data-search-result-target></div></div>');
+  try {
+    const message = dom.query("[data-user-message-bubble]");
+    const content = dom.query("[data-search-result-target]");
+    content.textContent = `${marker}\nRead the task.\n{"case":3}`;
+    assert.equal(chatGptRenderedPromptMatches(message, prompt), true);
+    assert.equal(chatGptRenderedPromptMatches(message, prompt.replace("1f8ea8d0e29c", "1f8ea8d0e29d")), false);
+  } finally { dom.restore(); }
 });
 
 test("stream updates append when possible and replace after correction", () => {
@@ -1551,6 +1692,23 @@ test("a code block is one part carrying its language, not a run of text lines", 
   assert.notEqual(code, undefined);
   assert.equal(code.language, "python");
   assert.match(code.text, /print\(1\)/u);
+});
+
+test("ChatGPT's code pane captures the file block without its Markdown toolbar", () => {
+  // The live case-001 response uses a div code block with no <pre>. The toolbar's language label
+  // is page furniture, while the nested <code> contains the exact file bytes.
+  const parts = partsOf('<p><span>FILE research/candidates.md</span></p>' +
+    '<div class="CodeBlock-zu1QM3"><div data-markdown-copy="code-block" data-search-result-target="">' +
+    '<div data-markdown-copy="exclude"><svg></svg><div>Markdown</div><div><button>Copy</button></div></div>' +
+    '<div class="chatgpt-code-scrollport"><code><span># Heading</span>\n<span>Thai ไทย</span></code></div>' +
+    '</div></div>');
+  const captured = composeCapturedResponse(parts);
+  assert.deepEqual(captured.segments.map(({ type, language, text }) => ({ type, language, text })), [
+    { type: "text", language: undefined, text: "FILE research/candidates.md\n" },
+    { type: "codeBlock", language: "markdown", text: "# Heading\nThai ไทย" },
+  ]);
+  assert.equal(captured.segments.map(({ text }) => text).join(""), captured.text);
+  assert.doesNotMatch(captured.text, /Markdown|Copy/u);
 });
 
 test("a language named by class is read when no attribute names one", () => {
@@ -3711,6 +3869,28 @@ test("the one permitted initial transition is announced and then used up", async
     () => bind(request),
     /The ChatGPT conversation changed during the active request/u,
   );
+});
+
+test("ChatGPT follows its provisional route to one final conversation", async () => {
+  const provisional = "https://chatgpt.com/c/local-chatgpt%3Af668ba9f-1ad1-4875-a815-2a3bbfad732a";
+  const final = "https://chatgpt.com/c/6ab65920-b6d4-83ec-8d3a-4064ebef03ca";
+  const { state, bind } = conversationBinder();
+  const request = activeRequest({
+    authorizedConversationIdentity: conversationIdentityFor("https://chatgpt.com/"),
+  });
+  state.url = provisional;
+  await bind(request);
+  state.url = final;
+  assert.equal(request.authorizedConversationIdentity, conversationIdentityFor("https://chatgpt.com/"));
+  assert.match(new URL(request.conversationUrl).pathname, /^\/c\/local-chatgpt%3A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu);
+  assert.match(new URL(state.url).pathname, /^\/c\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu);
+  await bind(request);
+  assert.deepEqual(state.sent.map((message) => [message.previousConversationUrl, message.conversationUrl]), [
+    ["https://chatgpt.com/", provisional], [provisional, final],
+  ]);
+  assert.equal(request.conversationUrl, final);
+  state.url = "https://chatgpt.com/c/other";
+  await assert.rejects(() => bind(request), /conversation changed during the active request/u);
 });
 
 test("a pending browser route confirmation leaves the transition available for retry", async () => {

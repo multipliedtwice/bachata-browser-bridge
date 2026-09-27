@@ -57,6 +57,15 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const scratch = async () => await scratchRoot("bachata-release-");
 
+const symlinkTest = (name, body) => test(name, async (t) => {
+  try {
+    await body(t);
+  } catch (error) {
+    if (process.platform !== "win32" || error?.code !== "EPERM" || error?.syscall !== "symlink") throw error;
+    t.skip("Windows denied symbolic-link creation; this fixture cannot run on this account");
+  }
+});
+
 const write = async (root, relative, contents) => {
   const target = path.join(root, relative);
   await mkdir(path.dirname(target), { recursive: true });
@@ -143,7 +152,7 @@ test("a release package enumerates regular files in one deterministic order", as
   }
 });
 
-test("a symbolic link is refused rather than followed into a release", async () => {
+symlinkTest("a symbolic link is refused rather than followed into a release", async () => {
   const root = await scratch();
   try {
     await write(root, "real.js", "real");
@@ -867,7 +876,7 @@ test("a test cleanup target can never escape the directory the run created", asy
   }
 });
 
-test("a scratch directory reached through a symlink is refused, and the link is not followed", async () => {
+symlinkTest("a scratch directory reached through a symlink is refused, and the link is not followed", async () => {
   // SAFETY. A symlink is how a checked path becomes an unchecked one between the check and the
   // removal. The link itself lives inside a directory this run created, so it is an accepted
   // target; what must not happen is that removing it removes what it points at.
@@ -900,7 +909,7 @@ test("a scratch directory reached through a symlink is refused, and the link is 
   }
 });
 
-test("a descendant reached through a symlink ancestor is refused before any removal", async () => {
+symlinkTest("a descendant reached through a symlink ancestor is refused before any removal", async () => {
   // SAFETY. The case a lexical guard gets wrong. `root/link/victim` starts with `root` as a
   // string and resolves to itself, while naming a file in a directory this run does not own.
   // Telling those apart needs the filesystem, and the proof is that the recorder stays empty
@@ -946,7 +955,7 @@ test("a descendant reached through a symlink ancestor is refused before any remo
   }
 });
 
-test("a symlink ancestor cannot redirect where a scratch child is created", async () => {
+symlinkTest("a symlink ancestor cannot redirect where a scratch child is created", async () => {
   // SAFETY. `mkdir` with `recursive` follows a link ancestor exactly as `rm` does, so a child
   // built under one would be written outside the owned root — and handed to a later cleanup.
   const root = await scratch();
@@ -1196,7 +1205,7 @@ test("clean removes the generated directory and leaves maintained source alone",
   }
 });
 
-test("clean refuses a generated name reached through a symlink, and keeps what it points at", async () => {
+symlinkTest("clean refuses a generated name reached through a symlink, and keeps what it points at", async () => {
   // SAFETY. `rm` unlinks a symbolic link rather than following it, so a `dist` that is a link is
   // removed as a link. What a lexical guard misses is a name *under* a link — `build/out` where
   // `build` points elsewhere is inside the package root as a string and outside it on disk.
@@ -1778,7 +1787,7 @@ test("nothing in this suite changed the repository, dirty state included", async
 // for. Reproduced before the fix in a scratch repository, where `format-check.mjs` reported the
 // OUTSIDE target's trailing whitespace under the in-repository name.
 
-test("an eligible symbolic link is refused by both gates rather than followed out of the repository", async () => {
+symlinkTest("an eligible symbolic link is refused by both gates rather than followed out of the repository", async () => {
   const root = await scratch();
   try {
     const repository = await gateRepository(root);
@@ -1811,7 +1820,7 @@ test("an eligible symbolic link is refused by both gates rather than followed ou
   }
 });
 
-test("a link to an in-repository file is refused by the same one rule", async () => {
+symlinkTest("a link to an in-repository file is refused by the same one rule", async () => {
   // ONE POLICY. Every symbolic link is refused, whatever it points at. Resolving the target and
   // allowing links that stay inside would need a realpath comparison that is itself racy, and
   // would read the same bytes twice under two names. An in-repository target is already a
@@ -1834,7 +1843,7 @@ test("a link to an in-repository file is refused by the same one rule", async ()
   }
 });
 
-test("the candidate reader never opens the path a link points at", async () => {
+symlinkTest("the candidate reader never opens the path a link points at", async () => {
   // A recorder over the real `open`, so "the outside file was not read" is recorded rather than
   // inferred from the gate's output.
   const root = await scratch();
@@ -1992,7 +2001,7 @@ const kindStats = (kind) => ({
   isCharacterDevice: () => kind === "character",
 });
 
-test("a tracked file under a symbolic-link ancestor is refused, not read from outside the repository", async () => {
+symlinkTest("a tracked file under a symbolic-link ancestor is refused, not read from outside the repository", async () => {
   // `git ls-files --cached` reads names out of the index, so Git never descends the working tree
   // for a tracked path to be enumerated: a directory replaced by a link after the fact still
   // yields every tracked name under it, with no link on the final component for `O_NOFOLLOW` to
@@ -2030,7 +2039,7 @@ test("a tracked file under a symbolic-link ancestor is refused, not read from ou
   }
 });
 
-test("a repository root reached through a symbolic link is refused before any candidate is opened", async () => {
+symlinkTest("a repository root reached through a symbolic link is refused before any candidate is opened", async () => {
   const root = await scratch();
   try {
     const repository = await makeScratchChild(root, "repository");

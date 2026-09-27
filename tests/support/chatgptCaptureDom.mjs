@@ -249,8 +249,8 @@ export const createChatGptCaptureDom = ({
     failStopQuery,
     failGetAttribute,
     thread: () => document.querySelector("#thread"),
-    composer: () => document.querySelector("#prompt-textarea"),
-    sendButton: () => document.querySelector("button[data-testid='send-button']"),
+    composer: () => document.querySelector("#prompt-textarea, [data-composer-markdown]"),
+    sendButton: () => document.querySelector("button[data-testid='send-button'], form[data-chatgpt-composer] button[aria-label='Send']"),
     hide: (element, how = { display: "none" }) => {
       element.bachataStyle = how;
       return element;

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   nextTurn,
+  deferred,
   installGlobals,
   endpoint,
   state,
@@ -17,6 +18,33 @@ import {
 const validToken = "1234";
 const otherEndpoint = "ws://127.0.0.1:51000/bachata-browser-bridge-v9";
 const routedCode = `v9.51000.${validToken}`;
+
+test("a pending pairing cannot replay its one-use code and clears after connection", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    if (message.type === "popup.pair") return state({ revision: 2, connecting: true });
+    if (message.type === "popup.discover") return state({ revision: 3, connected: true });
+    return state();
+  });
+  try {
+    await import(`../dist/popup/index.js?pending-pair=${String(Math.random())}`);
+    await nextTurn();
+    typePairing("7261");
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    assert.equal(byId("pair").disabled, true);
+    assert.equal(pairingValue(), "7261");
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    assert.equal(messages.filter((message) => message.type === "popup.pair").length, 1);
+    await click("refresh");
+    assert.equal(pairingValue(), "");
+    assert.equal(byId("connection").textContent, "Connected");
+  } finally {
+    restore();
+  }
+});
 
 /**
  * Pairing codes use the visible endpoint. Arbitrary clipboard values remain
@@ -126,6 +154,91 @@ test("a pairing code pasted into the OTP discovers its Bridge port on submit", a
     const pair = messages.find((message) => message.type === "popup.pair");
     assert.ok(pair, "the typed pairing code did not pair");
     assert.deepEqual(pair, { type: "popup.pair", endpoint: otherEndpoint, token: validToken });
+  } finally {
+    restore();
+  }
+});
+
+test("a four-digit code can pair to an explicitly selected local server port", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return message.type === "popup.pair"
+      ? state({ revision: 2, connected: true, endpoint: otherEndpoint })
+      : state();
+  });
+  try {
+    await import(`../dist/popup/index.js?manual-port=${String(Math.random())}`);
+    await nextTurn();
+    assert.equal(byId("server-port").value, "43127");
+    type("server-port", "51000");
+    typePairing(validToken);
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    assert.deepEqual(messages.find((message) => message.type === "popup.pair"), {
+      type: "popup.pair", endpoint: otherEndpoint, token: validToken,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("an invalid local server port cannot submit a four-digit code", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state();
+  });
+  try {
+    await import(`../dist/popup/index.js?invalid-port=${String(Math.random())}`);
+    await nextTurn();
+    type("server-port", "65536");
+    typePairing(validToken);
+    assert.equal(byId("pair").disabled, true);
+    assert.equal(byId("server-port").getAttribute("aria-invalid"), "true");
+    byId("pairing-form").fire("submit");
+    await nextTurn();
+    assert.equal(messages.some((message) => message.type === "popup.pair"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("Paste & connect uses an explicitly selected local server port", async () => {
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state({ revision: 2, connected: true, endpoint: otherEndpoint });
+  }, async () => validToken);
+  try {
+    await import(`../dist/popup/index.js?paste-manual-port=${String(Math.random())}`);
+    await nextTurn();
+    type("server-port", "51000");
+    await click("token-paste-pair");
+    await nextTurn();
+    assert.deepEqual(messages.find((message) => message.type === "popup.pair"), {
+      type: "popup.pair", endpoint: otherEndpoint, token: validToken,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("changing the local server port cancels an in-flight clipboard pairing", async () => {
+  const clipboard = deferred();
+  const messages = [];
+  const restore = installGlobals(async (message) => {
+    messages.push(message);
+    return state();
+  }, async () => clipboard.promise);
+  try {
+    await import(`../dist/popup/index.js?port-race=${String(Math.random())}`);
+    await nextTurn();
+    await click("token-paste-pair");
+    type("server-port", "51000");
+    clipboard.resolve(validToken);
+    await nextTurn();
+    assert.equal(messages.some((message) => message.type === "popup.pair"), false);
   } finally {
     restore();
   }

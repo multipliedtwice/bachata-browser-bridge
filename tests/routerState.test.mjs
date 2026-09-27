@@ -7,10 +7,12 @@ import {
   activeRequestMatchesSender,
   admitInitialTransition,
   bindingMatchesSession,
+  chatConfigurationForSession,
   interruptMatchesRequest,
   legacyStorageKeys,
   migratedStoredCandidate,
   normalizedHandledTabIds,
+  pairingIsCurrent,
   popupStatusReason,
   providerStartUrl,
   sameDocumentBinding,
@@ -22,6 +24,25 @@ import {
   withHandledTabs,
   withoutHandledTab,
 } from "../dist/background/routerState.js";
+
+test("pairing reuses only the same pending code or an authenticated socket", () => {
+  const input = { endpoint: "ws://127.0.0.1:43123/bridge", token: "1234",
+    storedEndpoint: "ws://127.0.0.1:43123/bridge", pairingToken: "1234",
+    connecting: false, connected: false, connectionToken: undefined };
+  assert.equal(pairingIsCurrent(input), false);
+  assert.equal(pairingIsCurrent({ ...input, storedEndpoint: "ws://127.0.0.1:43124/bridge", connecting: true }), false);
+  assert.equal(pairingIsCurrent({ ...input, connecting: true, pairingToken: "4321" }), false);
+  assert.equal(pairingIsCurrent({ ...input, connecting: true }), true);
+  assert.equal(pairingIsCurrent({ ...input, connected: true }), false);
+  assert.equal(pairingIsCurrent({ ...input, connected: true, connectionToken: "bound" }), true);
+});
+
+test("only a ChatGPT session carries its reported chat configuration", () => {
+  const configuration = { mode: "Work", pickerLabel: "GPT-6" };
+  assert.deepEqual(chatConfigurationForSession("chatgpt", configuration), { chatConfiguration: configuration });
+  assert.deepEqual(chatConfigurationForSession("chatgpt", undefined), {});
+  assert.deepEqual(chatConfigurationForSession("claude", configuration), {});
+});
 
 // BB-AUD-09. These two decisions used to live inside the 3,200-line service-worker entry,
 // where a test could only reach them by loading the whole worker and driving it through the
@@ -914,7 +935,29 @@ const transitionMessage = (overrides = {}) => ({
   agentId: "agent-1",
   sessionId: "session-1",
   submissionCommitted: true,
+  previousConversationUrl: "https://chatgpt.com/",
+  conversationUrl: "https://chatgpt.com/c/new-one",
+  conversationIdentity: "chatgpt:/c/new-one",
   ...overrides,
+});
+
+test("ChatGPT provisional route may become one final route in the same document", () => {
+  const provisional = "https://chatgpt.com/c/local-chatgpt%3Af668ba9f-1ad1-4875-a815-2a3bbfad732a";
+  const final = "https://chatgpt.com/c/6ab65920-b6d4-83ec-8d3a-4064ebef03ca";
+  const request = transitionRequest({
+    conversationUrl: provisional,
+    conversationIdentity: `chatgpt:${provisional}`,
+    transitionUsed: true,
+  });
+  const binding = transitionBinding({ conversationUrl: final, conversationIdentity: `chatgpt:${final}` });
+  const message = transitionMessage({ previousConversationUrl: provisional,
+    conversationUrl: final, conversationIdentity: `chatgpt:${final}` });
+  assert.equal(admitTransition({ request, binding, message }).admitted, true);
+  assert.deepEqual(admitTransition({ request, binding: transitionBinding({
+    conversationUrl: "https://chatgpt.com/c/other", conversationIdentity: "chatgpt:https://chatgpt.com/c/other",
+  }), message }).reason, "transition_already_used");
+  assert.equal(admitTransition({ request: { ...request, documentToken: "other" }, binding, message }).reason, "token_mismatch");
+  assert.equal(admitTransition({ request, binding, message: { ...message, conversationUrl: "https://chatgpt.com/c/other" } }).reason, "unsupported_transition");
 });
 
 const admitTransition = (overrides = {}) =>

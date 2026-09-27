@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindProvisionalCreation, normalizeConversationRegistry, promoteCreatedConversation, maximumProvisionalCreations, provisionalCreationLifetimeMs } from "../dist/background/conversationRegistry.js";
+import { bindProvisionalCreation, normalizeConversationRegistry, planCreatedConversationPromotion, promoteCreatedConversation, maximumProvisionalCreations, provisionalCreationLifetimeMs } from "../dist/background/conversationRegistry.js";
 import { storedStateFrom, migratedStoredCandidate, storageKey } from "../dist/background/routerState.js";
 import { isStableRecoveryIdentity, maximumRecoverableConversations } from "../dist/protocol/recovery.js";
 
@@ -12,6 +12,17 @@ const marker = bindProvisionalCreation({ id: id(1), provider: "chatgpt", tabId: 
 const binding = { ...initial, conversationUrl: entry().conversationUrl, conversationIdentity: entry().conversationIdentity };
 const request = { ...binding, initialConversationUrl: initial.conversationUrl, transitionUsed: true, submissionCommitted: true };
 const promote = (overrides = {}) => promoteCreatedConversation({ registry: undefined, marker, request, binding, now: 2000, ...overrides });
+
+test("a provisional route leaves its creation marker for the final route", () => {
+  const provisional = "https://chatgpt.com/c/local-chatgpt%3Af668ba9f-1ad1-4875-a815-2a3bbfad732a";
+  const waiting = planCreatedConversationPromotion({ registry: undefined, marker,
+    request: { ...request, conversationUrl: provisional,
+      conversationIdentity: `chatgpt:${provisional}` }, binding, now: 2000 });
+  assert.deepEqual(waiting, { stable: false, registry: undefined });
+  const final = planCreatedConversationPromotion({ registry: undefined, marker, request, binding, now: 2000 });
+  assert.equal(final.stable, true);
+  assert.deepEqual(final.registry, promote());
+});
 
 test("registry normalization rejects unknown versions and malformed envelopes", () => {
   for (const value of [null, [], "bad", {}, { version: 2, records: [entry()] }, { version: 1, records: "bad" }, { version: 1, records: [entry()], prompt: "private" }, registry(Array(1001).fill(entry()))]) {

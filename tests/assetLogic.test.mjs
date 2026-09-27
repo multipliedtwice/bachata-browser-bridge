@@ -289,6 +289,39 @@ test("asset discovery deduplicates links and captures provider-only controls", (
   }
 });
 
+test("discovers an exact ZIP filename link without a Download label", () => {
+  const originalLocation = globalThis.location;
+  globalThis.location = { href: "https://chatgpt.com/c/example" };
+  const archive = {
+    href: "https://raw.githubusercontent.com/example/test/main/sample.zip",
+    download: "",
+    id: "",
+    textContent: "sample.zip",
+    getAttribute: (name) => name === "href"
+      ? "https://raw.githubusercontent.com/example/test/main/sample.zip" : null,
+    scrollIntoView: () => undefined,
+    focus: () => undefined,
+  };
+  const ordinaryLink = {
+    ...archive,
+    textContent: "archive documentation",
+  };
+  const root = {
+    querySelectorAll: (selector) => selector === "a[href]" ? [archive, ordinaryLink] : [],
+  };
+  try {
+    const assets = logic.discoverLinkedAssets("chatgpt", root, "document-token");
+    assert.equal(assets.length, 1);
+    assert.equal(assets[0].metadata.name, "sample.zip");
+    assert.equal(assets[0].metadata.downloadAvailable, true);
+    assert.equal(logic.discoverLinkedAssets("chatgpt", {
+      querySelectorAll: (selector) => selector === "a[href]" ? [ordinaryLink] : [],
+    }, "document-token").length, 0);
+  } finally {
+    globalThis.location = originalLocation;
+  }
+});
+
 // BB-A4-N08. A control that states its own filename and also carries a transfer URL used to lose
 // that filename: construction fell back to the URL's basename, which an opaque provider URL turns
 // into a meaningless name with no extension and therefore no type.

@@ -90,7 +90,7 @@ Do not zip the working directory directly.
    it references paths that exist only after `npm run build` copies them into `dist/`.
    Loading the repository root in Chrome fails by design.
 2. Copy the four-digit pairing code from Bachata’s Browser Bridge settings in VS Code, then open the browser popup.
-3. Select **Paste & connect**. The default local port needs no URL. A custom-port code selects its port automatically.
+3. Select **Paste & connect**. The default local port needs no URL. For a standalone Bachata host on another port, open **Connect to another local server**, enter its numeric port, then enter or paste its four-digit code. A full `v9.port.code` value pasted into the code boxes also selects its port automatically.
 4. Open a ChatGPT or Claude conversation, sign in, then select **Refresh tabs**.
 5. Select **Use this chat** on a ready conversation. Each row shows its provider, title, readiness and any limitations; **Details** contains its tab ID and conversation identity.
 
@@ -100,7 +100,7 @@ The binding survives popup closes and service-worker restarts, and a Bachata-dri
 
 The popup shows automatic/manual completion and current limitations. **Details** contains secondary capability and identity fields. Saved bindings can be removed individually; revoking site access requires confirmation and preserves profiles. Recovery shows recorded submission/Stop facts and never replays a prompt. Generic manual selection completes the existing request and may stop generation.
 
-The popup settles into a status view. Once a conversation is bound it shows that conversation alone; **Change conversation** reveals the full list and **Done** returns. Selecting the connection status opens connection options; **Edit** reveals the token and address fields. When disconnected, the token field appears automatically and **Connection settings** reveals the address. Only ready rows offer **Use this chat**, and only while connected to VS Code. The background worker validates readiness again before binding.
+The popup settles into a status view. Once a conversation is bound it shows that conversation alone; **Change conversation** reveals the full list and **Done** returns. Selecting the connection status opens connection options. When disconnected, the four-digit code field and the optional local server port are available. Only ready rows offer **Use this chat**, and only while connected to Bachata. The background worker validates readiness again before binding.
 
 ## Multiple VS Code windows
 

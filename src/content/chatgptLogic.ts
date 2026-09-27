@@ -17,7 +17,11 @@ type BachataChatGptAlert = {
 };
 
 type BachataChatGptLogic = BachataProviderLogic & {
+  chatGptComposerText: (element: HTMLElement) => string;
+  chatGptComposerParagraphs: (document: Document, text: string) => HTMLElement[];
+  chatGptConfiguration: (document: Document) => { mode: "Chat" | "Work" | "Unknown"; pickerLabel: string; diagnostic?: string };
   chatGptRenderedPromptVariants: (element: HTMLElement) => string[];
+  chatGptRenderedPromptMatches: (element: HTMLElement, expected: string) => boolean;
   chatGptAlertCandidates: (sources: BachataChatGptAlertSources) => BachataChatGptAlertCandidate[];
   chatGptAlertElements: (sources: BachataChatGptAlertSources) => BachataChatGptAlertElement[];
   chatGptAlertSnapshot: (
@@ -60,6 +64,87 @@ const chatGptProviderLogic = createChatGptLogic({
   conversationPathPrefixes: ["/c/"],
 });
 
+// ChatGPT turns URLs into rich-link spans. Their visible `innerText` can acquire extra line breaks
+// around links even while each editor paragraph's text nodes still equal the exact prompt.
+const chatGptComposerText = (element: HTMLElement): string => {
+  const paragraphs = Array.from(element.children);
+  if (paragraphs.length > 0 && paragraphs.every((paragraph) => paragraph.tagName === "P"
+    && (!paragraph.querySelector("br")
+      || (paragraph.childNodes.length === 1 && paragraph.firstChild?.nodeName === "BR"))
+    && !Array.from(paragraph.querySelectorAll('[aria-hidden="true"]'))
+      .some((node) => node.textContent?.trim()))) {
+    return paragraphs.map((paragraph) => paragraph.textContent ?? "").join("\n");
+  }
+  return element.innerText.replace(/\n$/, "");
+};
+
+const chatGptComposerParagraphs = (document: Document, text: string): HTMLElement[] =>
+  text.split("\n").map((line) => {
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(line ? document.createTextNode(line) : document.createElement("br"));
+    return paragraph;
+  });
+
+const chatGptConfiguration = (document: Document): {
+  mode: "Chat" | "Work" | "Unknown";
+  pickerLabel: string;
+  diagnostic?: string;
+} => {
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(
+      'button, [role="button"], [role="tab"], [role="checkbox"], [role="radio"]',
+    ));
+  const label = (element: HTMLElement): string =>
+    (element.getAttribute("aria-label") || element.textContent || "").trim();
+  const modeControls = controls.filter((element) => label(element) === "Chat" || label(element) === "Work");
+    const selectedModes = modeControls.filter((element) =>
+      element.getAttribute("aria-pressed") === "true"
+      || element.getAttribute("aria-checked") === "true"
+      || element.getAttribute("aria-selected") === "true"
+      || element.getAttribute("data-state") === "checked"
+      || element.getAttribute("data-state") === "on")
+      .map(label);
+  const mode = selectedModes.length === 1 ? selectedModes[0] as "Chat" | "Work" : "Unknown";
+    const picker = document.querySelector<HTMLElement>('[aria-label="Select ChatGPT model"]')
+      ?? controls.find((element) => /select.*model|model.*select|thinking effort/iu.test(label(element)));
+    const pickerLabel = picker?.textContent?.trim() ?? "";
+    if (mode !== "Unknown" && pickerLabel) return { mode, pickerLabel };
+    const modeElements = Array.from(document.querySelectorAll<HTMLElement>("body *"))
+      .filter((element) => element.children.length === 0 && /^(Chat|Work)$/u.test(element.textContent?.trim() ?? ""))
+      .slice(0, 8)
+      .map((element) => {
+        const parent = element.parentElement;
+        const describe = (node: HTMLElement | null): string => node
+          ? [node.tagName.toLowerCase(), node.getAttribute("role"), node.getAttribute("aria-pressed"),
+            node.getAttribute("aria-selected"), node.getAttribute("aria-checked"),
+            node.getAttribute("data-state"), node.getAttribute("data-testid")]
+            .map((value) => value ?? "-").join("/") : "-";
+        return `${element.textContent?.trim()}:${describe(element)}>${describe(parent)}`;
+      });
+    const pickerElements = controls.filter((element) => /model|gpt|instant|latest|thinking/iu.test(label(element)))
+      .slice(0, 8)
+      .map((element) => `${element.tagName.toLowerCase()}/${element.getAttribute("role") ?? "-"}/${element.getAttribute("data-testid") ?? "-"}/${label(element).slice(0, 80)}`);
+    const code = Array.from(document.querySelectorAll<HTMLElement>(
+      '[data-markdown-copy="code-block"] code, pre code',
+    )).at(-1);
+    const codeHtml = code?.innerHTML ?? "";
+    const urlOffset = codeHtml.indexOf("chromewebstore");
+    const codeShape = code
+      ? `codeAnchors=${code.querySelectorAll("a").length};codeUrlHtml=${JSON.stringify(urlOffset < 0 ? "missing" : codeHtml.slice(Math.max(0, urlOffset - 60), urlOffset + 180))}`
+      : "code=missing";
+    const lastUser = Array.from(document.querySelectorAll<HTMLElement>(
+      "[data-message-author-role='user'], [data-user-message-bubble='true']",
+    )).at(-1);
+    const userShape = lastUser
+      ? chatGptRenderedPromptVariants(lastUser).map((value) =>
+        `${value.length}:${JSON.stringify(value.slice(0, 120))}:${JSON.stringify(value.slice(-120))}`).join("|")
+      : "missing";
+    return {
+      mode,
+      pickerLabel,
+      diagnostic: `modeControls=${modeControls.length};selectedModes=${selectedModes.length};picker=${picker ? "found" : "missing"};modeElements=${modeElements.join(",")};pickerElements=${pickerElements.join(",")};${codeShape};userShape=${userShape}`,
+  };
+};
+
 const chatGptRenderedPromptVariants = (element: HTMLElement): string[] => {
   const variants: string[] = [];
   const remember = (value: string | null | undefined): void => {
@@ -73,12 +158,13 @@ const chatGptRenderedPromptVariants = (element: HTMLElement): string[] => {
   let content: HTMLElement | null = null;
   try {
     content = element.querySelector<HTMLElement>(
-      "[data-testid='collapsible-user-message-content']",
+      "[data-testid='collapsible-user-message-content'], [data-search-result-target]",
     );
   } catch {
     return variants;
   }
   const scope = content ?? element;
+  const currentCollapsedContent = content?.hasAttribute("data-search-result-target") ?? false;
   if (scope !== element) {
     try {
       remember(scope.innerText);
@@ -89,7 +175,9 @@ const chatGptRenderedPromptVariants = (element: HTMLElement): string[] => {
   const reconstruct = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     const text = Array.from(node.childNodes).map(reconstruct).join("");
-    return node instanceof HTMLElement && node.matches("code.user-message-inline-code")
+    return node instanceof HTMLElement
+      && (node.matches("code.user-message-inline-code")
+        || (currentCollapsedContent && node.matches("code")))
       ? `\`${text}\``
       : text;
   };
@@ -99,6 +187,52 @@ const chatGptRenderedPromptVariants = (element: HTMLElement): string[] => {
     return variants;
   }
   return variants;
+};
+
+// The submitted bubble is Markdown-rendered. Repeated [URL](URL) strings in a
+// long JSON source snapshot can become several rich links with extra escaping.
+// The composer was checked byte-for-byte before Send; after Send, bind that turn
+// by all of the unchanged spans and each URL in order. Keep the ordinary exact
+// match for every other message shape.
+const chatGptRenderedPromptMatches = (element: HTMLElement, expected: string): boolean => {
+  const canonicalize = chatGptProviderLogic.canonicalizeRenderedPrompt;
+  const variants = chatGptRenderedPromptVariants(element).map(canonicalize);
+  if (variants.includes(expected)) return true;
+  // The composer was checked byte-for-byte before Send. A caller-provided one-time
+  // marker identifies the resulting user bubble even when ChatGPT's Markdown renderer
+  // changes whitespace or code-block punctuation. The waiter still excludes old turns
+  // and rejects multiple matches.
+  const marker = expected.match(/^BACHATA_REQUEST_ID:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/mu)?.[0];
+  if (marker && expected.split(marker).length === 2
+    && variants.some((candidate) => candidate.includes(marker))) return true;
+  if (expected.length < 4096) return false;
+  const links = [...expected.matchAll(/\[(https?:\/\/[^\]\s]+)\]\(\1\)/gu)];
+  if (links.length === 0) return false;
+  const chunks: string[] = [];
+  let offset = 0;
+  for (const link of links) {
+    const start = link.index;
+    if (start === undefined) return false;
+    chunks.push(expected.slice(offset, start));
+    offset = start + link[0].length;
+  }
+  chunks.push(expected.slice(offset));
+  if (chunks.some((chunk) => chunk.length <= 40)
+    || chunks[0]!.length < 512 || chunks.at(-1)!.length < 512) return false;
+  return variants.some((candidate) => {
+    if (Math.abs(candidate.length - expected.length) > expected.length * 0.08) return false;
+    let cursor = 0;
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index]!;
+      const probe = index === 0 ? chunk.slice(0, -20)
+        : index === chunks.length - 1 ? chunk.slice(20) : chunk.slice(20, -20);
+      const at = candidate.indexOf(probe, cursor);
+      if (at < 0 || (index === 0 && at !== 0)) return false;
+      if (index > 0 && !candidate.slice(cursor, at).includes(links[index - 1]![1]!)) return false;
+      cursor = at + probe.length;
+    }
+    return cursor === candidate.length;
+  });
 };
 
 // ChatGPT-specific alert taxonomy. It stays here rather than in the shared provider logic
@@ -351,10 +485,12 @@ const chatGptAlertErrorCode = (code: BachataChatGptAlertCode): string =>
 // searched, so a missing container costs evidence rather than borrowing someone else's.
 const chatGptCompletionActionSelectors = [
   "button[data-testid='copy-turn-action-button']",
+  "button[aria-label='Copy']",
 ];
 const chatGptTurnContainerSelectors = [
   "section[data-testid^='conversation-turn-']",
   "article[data-testid^='conversation-turn-']",
+  "div.group.pb-2.pt-2",
 ];
 
 // One definition of "the turn holding this response", used both to scope the end-of-turn control
@@ -396,7 +532,11 @@ const chatGptObservationFaultVerdict = (input: {
 
 bachataChatGptGlobal.__pairChatGptLogic = {
   ...chatGptProviderLogic,
+  chatGptComposerText,
+  chatGptComposerParagraphs,
+  chatGptConfiguration,
   chatGptRenderedPromptVariants,
+  chatGptRenderedPromptMatches,
   chatGptAlertCandidates,
   chatGptAlertElements,
   chatGptAlertSnapshot,

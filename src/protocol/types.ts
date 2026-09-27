@@ -70,6 +70,7 @@ export type BrowserSession = {
   conversationUrl: string;
   conversationIdentity: string;
   title?: string;
+  chatConfiguration?: { mode: "Chat" | "Work" | "Unknown"; pickerLabel: string; diagnostic?: string };
   capabilities?: BrowserSessionCapabilities;
   status:
     | "disconnected"

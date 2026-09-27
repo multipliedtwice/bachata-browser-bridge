@@ -361,6 +361,13 @@ const bachataAssetDownloadHint = (input: {
   if (input.declaredDownload === true) {
     return true;
   }
+  // A file link labelled with its exact ZIP filename is an explicit archive handoff even
+  // when the provider omits a "Download" word or HTML download attribute.
+  const pathBasename = input.url.pathname.split("/").pop()?.toLowerCase();
+  if (pathBasename?.endsWith(".zip")
+    && input.textContent?.trim().toLowerCase() === pathBasename) {
+    return true;
+  }
   const hint = [
     input.download,
     input.ariaLabel,
